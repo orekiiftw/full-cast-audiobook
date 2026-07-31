@@ -1,18 +1,19 @@
-import { useState, useEffect, useRef, useCallback, memo } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "./ui/Button";
 import { Badge } from "./ui/Badge";
 import { Card } from "./ui/Card";
 import { Skeleton } from "./ui/Skeleton";
 import { Icon } from "./ui/Icon";
+import { ChapterRow } from "./bookDetail/ChapterRow";
+import { NarratorCard } from "./bookDetail/NarratorCard";
+import { PronunciationEditor } from "./bookDetail/PronunciationEditor";
 import { useToast } from "./ui/Toast";
 import { useSSE } from "../hooks/useSSE";
 import { apiFetch, deleteBook, reportNetworkError } from "../lib/api";
-import { formatDuration } from "../lib/format";
 import type {
   Book,
   Chapter,
   PipelineEvent,
-  PronunciationTerm,
   BookDetailResponse,
 } from "../types/api";
 
@@ -27,102 +28,6 @@ type DetailData = BookDetailResponse & {
   segmentProgress?: Record<string, { total: number; done: number }>;
   canRetry?: boolean;
 };
-
-const CHAPTER_STATUS: Record<
-  Chapter["status"],
-  { tone: "neutral" | "gold" | "cyan" | "emerald" | "red"; pulse: boolean; label: string }
-> = {
-  queued: { tone: "neutral", pulse: false, label: "Queued" },
-  processing: { tone: "gold", pulse: true, label: "Performing" },
-  partial_ready: { tone: "cyan", pulse: true, label: "Live" },
-  ready: { tone: "emerald", pulse: false, label: "Ready" },
-  failed: { tone: "red", pulse: false, label: "Failed" },
-};
-
-interface ChapterRowProps {
-  chapter: Chapter;
-  progress: { total: number; done: number } | undefined;
-  isActive: boolean;
-  onSelect: (chapter: Chapter) => void;
-}
-
-/**
- * Memoized so segment_ready SSE bursts (one setState per event, several per
- * second with concurrent workers) only re-render rows whose own data changed
- * instead of the whole chapter list every event.
- */
-const ChapterRow = memo(function ChapterRow({ chapter: ch, progress, isActive, onSelect }: ChapterRowProps) {
-  const hasVoicedLines = !!progress && progress.done > 0;
-  const isPlayable =
-    ch.status === "ready" ||
-    ch.status === "partial_ready" ||
-    (hasVoicedLines && (ch.status === "processing" || ch.status === "queued"));
-  const status = CHAPTER_STATUS[ch.status];
-  const progressPct =
-    progress && progress.total > 0 ? (progress.done / progress.total) * 100 : 0;
-
-  return (
-    <div
-      onClick={() => isPlayable && onSelect(ch)}
-      className={`relative rounded-2xl p-4 flex justify-between items-center gap-4 transition-all duration-300 overflow-hidden border ${
-        isPlayable
-          ? "border-white/[0.05] bg-cinema-900/30 hover:bg-cinema-900/55 hover:border-white/[0.09] cursor-pointer"
-          : "border-white/[0.03] opacity-50"
-      } ${isActive ? "ring-1 ring-gold-500/35 bg-gold-500/[0.06] border-gold-500/20" : ""}`}
-    >
-      {ch.status === "processing" && progressPct > 0 && (
-        <div
-          className="absolute inset-y-0 left-0 bg-gold-500/[0.07] transition-all duration-500"
-          style={{ width: `${progressPct}%` }}
-        />
-      )}
-
-      <div className="flex-1 min-w-0 pr-2 relative">
-        <div className="flex items-center gap-3.5">
-          <span className="font-mono text-[11px] text-gold-500/90 tabular-nums shrink-0 w-6">
-            {ch.chapterIndex.toString().padStart(2, "0")}
-          </span>
-          <h4
-            className={`font-serif text-[15px] font-medium truncate ${
-              isActive ? "text-gold-300" : "text-cinema-100"
-            }`}
-          >
-            {ch.title}
-          </h4>
-        </div>
-        {ch.status === "processing" && (
-          <p className="text-[10px] text-gold-400/80 mt-1.5 ml-9 tracking-wide">
-            {hasVoicedLines ? "Live · " : "Performing · "}
-            {progress ? `${progress.done}/${progress.total || "?"}` : "…"}
-          </p>
-        )}
-        {ch.status === "partial_ready" && (
-          <p className="text-[10px] text-sky-300/90 mt-1.5 ml-9 tracking-wide">
-            Listen live
-            {progress ? ` · ${progress.done}/${progress.total || "?"} ready` : ""}
-          </p>
-        )}
-        {isActive && (
-          <p className="text-[10px] text-gold-400 mt-1.5 ml-9 tracking-wide flex items-center gap-2">
-            <span className="eq text-gold-400" aria-hidden="true">
-              <span /><span /><span />
-            </span>
-            Now playing
-          </p>
-        )}
-      </div>
-
-      <div className="flex items-center gap-3.5 relative shrink-0">
-        <span className="font-mono text-[11px] text-cinema-500 tabular-nums hidden sm:block">
-          {formatDuration(ch.durationMs)}
-        </span>
-        <Badge tone={status.tone} pulse={status.pulse}>
-          {status.label}
-        </Badge>
-      </div>
-    </div>
-  );
-});
 
 export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapterId }: BookDetailProps) {
   const { showToast } = useToast();
@@ -589,39 +494,11 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
       )}
 
       {narrator && (
-        <section className="mb-14">
-          <div className="flex items-baseline justify-between pb-4 mb-5 border-b border-white/[0.05]">
-            <h2 className="font-serif text-2xl font-medium tracking-tight">Narration</h2>
-            <span className="label-caps">Single narrator</span>
-          </div>
-          <Card className="p-4 flex justify-between items-center gap-4" isInteractive>
-            <div className="min-w-0">
-              <h4 className="font-serif text-[15px] font-medium truncate">
-                {narrator.name}
-                <span className="ml-2 text-[11px] font-sans font-normal text-gold-400/90 uppercase tracking-[0.14em]">
-                  {narrator.ttsVoiceName}
-                </span>
-              </h4>
-              <p className="text-[11px] text-cinema-400 mt-1 tracking-wide">
-                Voices every character &amp; narration
-              </p>
-              <p className="text-[11px] text-cinema-500 mt-1.5 italic line-clamp-1 font-serif">
-                “{narrator.styleString}”
-              </p>
-            </div>
-            <button
-              onClick={() => handlePlayPreview(narrator.id)}
-              aria-label={`Preview narrator voice ${narrator.ttsVoiceName}`}
-              className={`w-10 h-10 shrink-0 rounded-full border flex items-center justify-center transition-all duration-300 ${
-                playingPreviewId === narrator.id
-                  ? "border-gold-400/50 bg-gold-500/15 text-gold-300 shadow-glow-sm"
-                  : "border-white/[0.08] text-gold-400 hover:border-gold-500/40 hover:bg-gold-500/10"
-              }`}
-            >
-              <Icon name={playingPreviewId === narrator.id ? "pause" : "play"} size={14} />
-            </button>
-          </Card>
-        </section>
+        <NarratorCard
+          narrator={narrator}
+          playingPreviewId={playingPreviewId}
+          onPlayPreview={handlePlayPreview}
+        />
       )}
 
       <section className="mb-14">
@@ -644,51 +521,15 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
         </div>
       </section>
 
-      <Card className="p-6 sm:p-7">
-        <h2 className="font-serif text-xl font-medium tracking-tight mb-2">Phonetic dictionary</h2>
-        <p className="text-xs text-cinema-400 mb-6 leading-relaxed max-w-lg">
-          Guide how names and invented words should sound. Hints are woven into the performance prompts.
-        </p>
-
-        {pronList.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-6">
-            {pronList.map((p: PronunciationTerm) => (
-              <span
-                key={p.id}
-                className="text-xs px-3 py-1.5 rounded-full bg-cinema-950/60 border border-white/[0.06] flex gap-2"
-              >
-                <span className="font-medium text-cinema-100">{p.term}</span>
-                <span className="text-cinema-600">→</span>
-                <span className="italic text-gold-400 font-mono">{p.phoneticHint}</span>
-              </span>
-            ))}
-          </div>
-        )}
-
-        <form onSubmit={handleAddPronunciation} className="flex flex-col sm:flex-row gap-3">
-          <input
-            type="text"
-            required
-            maxLength={200}
-            placeholder="Term (e.g. Cthulhu)"
-            value={newTerm}
-            onChange={(e) => setNewTerm(e.target.value)}
-            className="input-field flex-1 !text-xs"
-          />
-          <input
-            type="text"
-            required
-            maxLength={200}
-            placeholder="Hint (e.g. kuh-THOO-loo)"
-            value={newHint}
-            onChange={(e) => setNewHint(e.target.value)}
-            className="input-field flex-1 !text-xs"
-          />
-          <Button type="submit" variant="secondary" size="sm" isLoading={addingPron}>
-            Add
-          </Button>
-        </form>
-      </Card>
+      <PronunciationEditor
+        pronList={pronList}
+        newTerm={newTerm}
+        newHint={newHint}
+        addingPron={addingPron}
+        onNewTermChange={setNewTerm}
+        onNewHintChange={setNewHint}
+        onSubmit={handleAddPronunciation}
+      />
     </div>
   );
 }
