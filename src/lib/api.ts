@@ -1,0 +1,50 @@
+import type { ApiError, AuthResponse, AuthUser } from "../types/api";
+
+export const AUTH_EXPIRED_EVENT = "narratea:auth-expired";
+
+interface ApiFetchOptions {
+  notifyOnUnauthorized?: boolean;
+}
+
+/**
+ * Same-origin API wrapper. Cookies are included explicitly and any protected
+ * request that loses its session tells the root auth gate to reset the app.
+ */
+export async function apiFetch(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  { notifyOnUnauthorized = true }: ApiFetchOptions = {}
+): Promise<Response> {
+  const requestInit: RequestInit = {
+    ...init,
+    credentials: init.credentials ?? "same-origin",
+  };
+  const response = await fetch(input, requestInit);
+
+  if (response.status === 401 && notifyOnUnauthorized) {
+    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+  }
+
+  return response;
+}
+
+export function authUserFromResponse(payload: AuthResponse | AuthUser): AuthUser | null {
+  const candidate = "user" in payload ? payload.user : payload;
+  if (!candidate || typeof candidate.email !== "string" || !candidate.email.trim()) return null;
+  return candidate;
+}
+
+/** Only display plain, bounded backend error strings; never render server markup. */
+export async function safeApiError(
+  response: Response,
+  fallback = "Something went wrong. Please try again."
+): Promise<string> {
+  try {
+    const payload = (await response.json()) as Partial<ApiError>;
+    if (typeof payload.error !== "string") return fallback;
+    const message = payload.error.replace(/[<>]/g, "").trim();
+    return message ? message.slice(0, 240) : fallback;
+  } catch {
+    return fallback;
+  }
+}

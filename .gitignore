@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Build output
+dist/
+
+# Local storage fallback for R2
+.storage/
+
+# Drizzle / DB artifacts
+drizzle/
+
+# Logs & OS
+*.log
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# TypeScript
+*.tsbuildinfo
+
+# Test / temp
+tmp/
+temp/
+*.tmp

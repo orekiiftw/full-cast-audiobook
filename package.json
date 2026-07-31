@@ -1,0 +1,44 @@
+{
+  "name": "full-cast-audiobook",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev:server": "bun run src/server.ts",
+    "dev:client": "vite",
+    "build:client": "vite build",
+    "preview:client": "vite preview",
+    "start": "bun run build:client && bun run src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
+    "test:pipeline": "bun run src/test-pipeline.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.500.0",
+    "@google/genai": "^1.0.0",
+    "adm-zip": "^0.5.10",
+    "bullmq": "^5.81.2",
+    "drizzle-orm": "^0.30.0",
+    "ioredis": "^5.11.1",
+    "node-html-parser": "^6.1.12",
+    "pg": "^8.11.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.5",
+    "@types/bun": "^1.2.0",
+    "@types/node": "^20.12.7",
+    "@types/pg": "^8.11.5",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "drizzle-kit": "^0.21.0",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.3",
+    "typescript": "^5.4.5",
+    "vite": "^5.3.1"
+  }
+}

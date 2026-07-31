@@ -1,0 +1,327 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-cinema-950 text-cinema-100 font-sans antialiased;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    background-image:
+      radial-gradient(ellipse 100% 60% at 50% -30%, rgba(196, 146, 62, 0.09), transparent 55%),
+      radial-gradient(ellipse 50% 40% at 100% 0%, rgba(99, 80, 160, 0.06), transparent 50%),
+      radial-gradient(ellipse 40% 30% at 0% 80%, rgba(196, 146, 62, 0.04), transparent 45%);
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+
+  /* Fixed background attachments are a notorious scroll-jank source on mobile
+     (especially iOS Safari) — let the gradient scroll with the page there. */
+  @media (max-width: 768px) {
+    body {
+      background-attachment: scroll;
+    }
+  }
+
+  ::selection {
+    @apply bg-gold-400/90 text-cinema-950;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-gold-400/50 ring-offset-2 ring-offset-cinema-950 rounded-lg;
+  }
+}
+
+@layer components {
+  .glass {
+    background: linear-gradient(
+      165deg,
+      rgba(22, 22, 31, 0.85) 0%,
+      rgba(12, 12, 18, 0.78) 100%
+    );
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  }
+
+  .glass-strong {
+    background: linear-gradient(
+      180deg,
+      rgba(22, 22, 31, 0.92) 0%,
+      rgba(10, 10, 16, 0.94) 100%
+    );
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.05) inset,
+      0 -1px 0 rgba(0, 0, 0, 0.3) inset;
+  }
+
+  .app-header {
+    background-color: rgba(7, 7, 11, 0.7);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+  }
+
+  /* Large backdrop blurs are the top compositing cost on mobile GPUs.
+     Halve the radius on small screens and trade for a more opaque tint. */
+  @media (max-width: 768px) {
+    .glass {
+      backdrop-filter: blur(10px) saturate(140%);
+      -webkit-backdrop-filter: blur(10px) saturate(140%);
+    }
+    .glass-strong {
+      backdrop-filter: blur(14px) saturate(150%);
+      -webkit-backdrop-filter: blur(14px) saturate(150%);
+    }
+    .app-header {
+      background-color: rgba(7, 7, 11, 0.86);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+  }
+
+  .grainy {
+    position: relative;
+  }
+
+  .grainy::before {
+    content: "";
+    /* Fixed, not absolute: the noise layer is composited once instead of
+       being repainted on every scroll frame. */
+    position: fixed;
+    inset: 0;
+    opacity: 0.018;
+    pointer-events: none;
+    z-index: 1;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.04),
+      transparent
+    );
+    animation: shimmer 2s infinite;
+  }
+
+  .hairline {
+    border: 0;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(196, 146, 62, 0.28),
+      transparent
+    );
+  }
+
+  .cover-frame {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+  }
+
+  .cover-frame::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      145deg,
+      rgba(255, 255, 255, 0.1) 0%,
+      transparent 42%,
+      transparent 58%,
+      rgba(0, 0, 0, 0.25) 100%
+    );
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  .eq {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 12px;
+  }
+
+  .eq span {
+    width: 2.5px;
+    border-radius: 999px;
+    background: currentColor;
+    height: 30%;
+    transform-origin: bottom;
+    animation: eq-bounce 1s ease-in-out infinite;
+  }
+
+  .eq span:nth-child(1) {
+    animation-delay: 0s;
+  }
+  .eq span:nth-child(2) {
+    animation-delay: 0.22s;
+  }
+  .eq span:nth-child(3) {
+    animation-delay: 0.44s;
+  }
+
+  .eq-paused span {
+    animation-play-state: paused;
+    height: 30%;
+  }
+
+  @keyframes eq-bounce {
+    0%,
+    100% {
+      height: 25%;
+    }
+    50% {
+      height: 100%;
+    }
+  }
+
+  .label-caps {
+    @apply text-[10px] font-medium uppercase tracking-[0.22em] text-cinema-400;
+  }
+
+  .input-field {
+    @apply w-full rounded-xl border border-cinema-700/80 bg-cinema-950/80 px-3.5 py-2.5 text-sm text-white
+      placeholder:text-cinema-500
+      focus:border-gold-500/60 focus:outline-none focus:ring-2 focus:ring-gold-500/15
+      transition-all duration-200;
+  }
+
+  .input-field[aria-invalid="true"] {
+    @apply border-red-800/70 focus:border-red-500/70 focus:ring-red-500/15;
+  }
+
+  .auth-shell {
+    position: relative;
+    overflow: hidden;
+    background:
+      linear-gradient(115deg, rgba(7, 7, 11, 0.98), rgba(12, 12, 18, 0.94)),
+      radial-gradient(ellipse at center, rgba(196, 146, 62, 0.08), transparent 55%);
+  }
+
+  .auth-shell::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+    background-size: 72px 72px;
+    mask-image: linear-gradient(to bottom, black, transparent 85%);
+  }
+
+  .auth-orb {
+    position: absolute;
+    border-radius: 9999px;
+    pointer-events: none;
+    filter: blur(90px);
+  }
+
+  .auth-orb--gold {
+    width: min(34rem, 70vw);
+    height: min(34rem, 70vw);
+    left: -12rem;
+    top: -12rem;
+    background: rgba(196, 146, 62, 0.13);
+  }
+
+  .auth-orb--violet {
+    width: min(30rem, 65vw);
+    height: min(30rem, 65vw);
+    right: -12rem;
+    bottom: -14rem;
+    background: rgba(99, 80, 160, 0.09);
+  }
+
+  /* Bottom player sheet: clears the iPhone home indicator and uses dynamic
+     viewport units so mobile browser chrome doesn't clip the expanded view. */
+  .player-sheet {
+    height: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .player-sheet--expanded {
+    height: 88vh;
+    height: 88dvh;
+  }
+
+  @media (min-width: 768px) {
+    .player-sheet--expanded {
+      height: 78vh;
+      height: 78dvh;
+    }
+  }
+
+  .modal-panel {
+    max-height: 85vh;
+    max-height: 85dvh;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .text-gradient {
+    @apply bg-gradient-to-br from-white via-cinema-100 to-cinema-300 bg-clip-text text-transparent;
+  }
+
+  .text-gradient-gold {
+    @apply bg-gradient-to-r from-gold-300 via-gold-400 to-gold-500 bg-clip-text text-transparent;
+  }
+}
+
+/* Honor reduced-motion: disable non-essential animation (pings, shimmers,
+   fades) and smooth scrolling for users who ask for it. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
