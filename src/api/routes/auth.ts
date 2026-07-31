@@ -42,20 +42,11 @@ function verifyAgainstDummy(password: string): Promise<boolean> {
     .catch(() => false);
 }
 
-// `connectionIp` is resolved once at the server edge via parsedClientIp
-// (server.ts imports it from auth.ts). Auth handlers receive the
-// authoritative client IP, so there is nothing left to parse here — return it
-// directly. The raw socket address ("unknown" when there is no socket, e.g.
-// tests) is the fallback.
-function clientIp(connectionIp: string): string {
-  return connectionIp;
-}
-
 function rateLimited(req: Request, route: string, connectionIp: string): boolean {
   void req;
   const now = Date.now();
   sweepAttempts(now);
-  const key = `${route}:${clientIp(connectionIp)}`;
+  const key = `${route}:${connectionIp}`;
   const entry = attempts.get(key);
   if (!entry || entry.resetAt <= now) {
     attempts.set(key, { count: 1, resetAt: now + WINDOW_MS });

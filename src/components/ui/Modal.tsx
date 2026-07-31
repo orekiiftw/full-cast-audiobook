@@ -7,10 +7,9 @@ interface ModalProps {
   onClose: () => void;
   title: string;
   children: ReactNode;
-  footer?: ReactNode;
 }
 
-export function Modal({ isOpen, onClose, title, children, footer }: ModalProps) {
+export function Modal({ isOpen, onClose, title, children }: ModalProps) {
   useEffect(() => {
     if (!isOpen) return;
 
@@ -52,8 +51,6 @@ export function Modal({ isOpen, onClose, title, children, footer }: ModalProps) 
         </div>
 
         <div className="relative space-y-4">{children}</div>
-
-        {footer && <div className="relative mt-6 flex items-center justify-end gap-3">{footer}</div>}
       </div>
     </div>
   );

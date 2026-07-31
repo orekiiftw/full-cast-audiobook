@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { getSharedAudio } from "../lib/sharedAudio";
 
 interface UseAudioPlayerOptions {
@@ -34,7 +34,6 @@ export function useAudioPlayer({
   onPlayBlocked,
 }: UseAudioPlayerOptions = {}) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [isReady, setIsReady] = useState(false);
   /** User/app wants playback; retry when the element becomes playable. */
   const wantPlayingRef = useRef(false);
   const playGenerationRef = useRef(0);
@@ -55,7 +54,6 @@ export function useAudioPlayer({
     audioRef.current = audio;
 
     const tryAutoResume = () => {
-      setIsReady(true);
       if (wantPlayingRef.current && audio.paused && audio.src && !audio.src.startsWith("data:")) {
         void audio.play().catch((err: unknown) => {
           const name = err instanceof Error ? err.name : "";
@@ -68,8 +66,6 @@ export function useAudioPlayer({
         });
       }
     };
-
-    const handleEmptied = () => setIsReady(false);
 
     const handleTimeUpdate = () => {
       onTimeUpdateRef.current?.(Math.round(audio.currentTime * 1000));
@@ -89,29 +85,21 @@ export function useAudioPlayer({
       }
     };
 
-    const handleWaiting = () => {
-      // no-op; browser is buffering
-    };
-
     audio.addEventListener("canplay", tryAutoResume);
     audio.addEventListener("canplaythrough", tryAutoResume);
     audio.addEventListener("loadeddata", tryAutoResume);
-    audio.addEventListener("emptied", handleEmptied);
     audio.addEventListener("timeupdate", handleTimeUpdate);
     audio.addEventListener("ended", handleEnded);
     audio.addEventListener("stalled", handleStalled);
-    audio.addEventListener("waiting", handleWaiting);
     audio.addEventListener("suspend", handleStalled);
 
     return () => {
       audio.removeEventListener("canplay", tryAutoResume);
       audio.removeEventListener("canplaythrough", tryAutoResume);
       audio.removeEventListener("loadeddata", tryAutoResume);
-      audio.removeEventListener("emptied", handleEmptied);
       audio.removeEventListener("timeupdate", handleTimeUpdate);
       audio.removeEventListener("ended", handleEnded);
       audio.removeEventListener("stalled", handleStalled);
-      audio.removeEventListener("waiting", handleWaiting);
       audio.removeEventListener("suspend", handleStalled);
       // Do NOT destroy the shared element or clear src here — chapter changes
       // remount Player and must keep the unlocked element alive.
@@ -164,18 +152,6 @@ export function useAudioPlayer({
     audio?.pause();
   }, []);
 
-  const setSrc = useCallback((src: string, force = false) => {
-    const audio = audioRef.current ?? getSharedAudio();
-    audioRef.current = audio;
-    const absolute = new URL(src, window.location.href).href;
-    if (!force && audio.src === absolute) return;
-    setIsReady(false);
-    // Bump generation so an in-flight play() from the previous source aborts cleanly
-    playGenerationRef.current += 1;
-    audio.src = src;
-    audio.load();
-  }, []);
-
   /**
    * Load source, optionally seek, then play — serialized to avoid AbortError races
    * that leave the UI in a "playing" state while the element is paused at 0:00.
@@ -190,7 +166,6 @@ export function useAudioPlayer({
       const needsLoad = force || audio.src !== absolute;
 
       if (needsLoad) {
-        setIsReady(false);
         playGenerationRef.current += 1;
         audio.src = src;
         audio.load();
@@ -224,7 +199,6 @@ export function useAudioPlayer({
 
       try {
         await audio.play();
-        setIsReady(true);
         return true;
       } catch (err: unknown) {
         const name = err instanceof Error ? err.name : "";
@@ -263,35 +237,18 @@ export function useAudioPlayer({
     return (audioRef.current ?? getSharedAudio()).currentTime ?? 0;
   }, []);
 
-  const getDuration = useCallback(() => {
-    return (audioRef.current ?? getSharedAudio()).duration ?? 0;
-  }, []);
-
-  const getBufferedRanges = useCallback((): Array<{ start: number; end: number }> => {
-    const audio = audioRef.current ?? getSharedAudio();
-    const ranges: Array<{ start: number; end: number }> = [];
-    for (let i = 0; i < audio.buffered.length; i++) {
-      ranges.push({ start: audio.buffered.start(i), end: audio.buffered.end(i) });
-    }
-    return ranges;
-  }, []);
-
   const isActuallyPaused = useCallback(() => {
     const audio = audioRef.current ?? getSharedAudio();
     return audio.paused;
   }, []);
 
   return {
-    isReady,
     play,
     pause,
-    setSrc,
     loadAndPlay,
     seekTo,
     setPlaybackRate,
     getCurrentTime,
-    getDuration,
-    getBufferedRanges,
     isActuallyPaused,
     audioRef,
   };
