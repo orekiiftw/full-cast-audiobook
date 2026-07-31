@@ -6,7 +6,7 @@ import { Skeleton } from "./ui/Skeleton";
 import { Icon } from "./ui/Icon";
 import { useToast } from "./ui/Toast";
 import { useSSE } from "../hooks/useSSE";
-import { apiFetch, reportNetworkError } from "../lib/api";
+import { apiFetch, deleteBook, reportNetworkError } from "../lib/api";
 import { formatDuration } from "../lib/format";
 import type {
   Book,
@@ -449,19 +449,9 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(`Delete "${book.title}" from your library?`)) return;
     setDeleting(true);
     try {
-      const res = await apiFetch(`/api/books/${bookId}`, { method: "DELETE" });
-      if (!res.ok) {
-        const body = (await res.json()) as { error?: string };
-        showToast(body.error || "Delete failed.", "error");
-        return;
-      }
-      showToast("Book deleted.");
-      onBack();
-    } catch (err) {
-      reportNetworkError(err, showToast);
+      if (await deleteBook(bookId, book.title, showToast)) onBack();
     } finally {
       setDeleting(false);
     }

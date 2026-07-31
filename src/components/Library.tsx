@@ -5,7 +5,7 @@ import { Modal } from "./ui/Modal";
 import { Skeleton } from "./ui/Skeleton";
 import { Icon } from "./ui/Icon";
 import { useToast } from "./ui/Toast";
-import { apiFetch, reportNetworkError } from "../lib/api";
+import { apiFetch, deleteBook, reportNetworkError } from "../lib/api";
 import type { Book } from "../types/api";
 
 interface LibraryProps {
@@ -195,22 +195,11 @@ export default function Library({ onSelectBook, bootBooks }: LibraryProps) {
     setIsModalOpen(true);
   };
 
-  const handleDeleteBook = async (e: React.MouseEvent, bookId: string, bookTitle: string) => {
+  const handleDeleteBook = (e: React.MouseEvent, bookId: string, bookTitle: string) => {
     e.stopPropagation();
-    if (!window.confirm(`Delete "${bookTitle}" from your library?`)) return;
-
-    try {
-      const res = await apiFetch(`/api/books/${bookId}`, { method: "DELETE" });
-      if (!res.ok) {
-        const err = (await res.json()) as { error?: string };
-        showToast(err.error || "Failed to delete book.", "error");
-        return;
-      }
-      setBooks((prev) => prev.filter((b) => b.id !== bookId));
-      showToast("Book deleted.");
-    } catch (err) {
-      reportNetworkError(err, showToast);
-    }
+    void deleteBook(bookId, bookTitle, showToast).then((deleted) => {
+      if (deleted) setBooks((prev) => prev.filter((b) => b.id !== bookId));
+    });
   };
 
   return (

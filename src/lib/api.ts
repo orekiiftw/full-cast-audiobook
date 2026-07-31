@@ -42,6 +42,27 @@ export function reportNetworkError(err: unknown, showToast: ShowToast): void {
   showToast("Network error occurred.", "error");
 }
 
+/**
+ * Confirm + DELETE /api/books/:id + toast, shared by the library card and the
+ * detail view. Resolves true only when the book was actually deleted.
+ */
+export async function deleteBook(bookId: string, title: string, showToast: ShowToast): Promise<boolean> {
+  if (!window.confirm(`Delete "${title}" from your library?`)) return false;
+  try {
+    const res = await apiFetch(`/api/books/${bookId}`, { method: "DELETE" });
+    if (!res.ok) {
+      const body = (await res.json()) as { error?: string };
+      showToast(body.error || "Failed to delete book.", "error");
+      return false;
+    }
+    showToast("Book deleted.");
+    return true;
+  } catch (err) {
+    reportNetworkError(err, showToast);
+    return false;
+  }
+}
+
 /** Only display plain, bounded backend error strings; never render server markup. */
 export async function safeApiError(
   response: Response,
