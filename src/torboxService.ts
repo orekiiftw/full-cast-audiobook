@@ -1,4 +1,5 @@
 import { TORRENT } from "./lib/constants";
+import { readStreamWithCap } from "./lib/readStream";
 import { isZipBuffer } from "./lib/validators";
 
 const TORBOX_API_KEY = process.env.TORBOX_API_KEY;
@@ -192,7 +193,7 @@ export async function downloadBookFromTorrent(magnetOrHash: string, onProgress?:
   verifyBookBuffer(buffer, filename);
   return { buffer, filename };
 }
-async function readBodyWithCap(response: Response, cap: number): Promise<Buffer> { if (!response.body) throw new Error("Empty response body from CDN."); const reader = response.body.getReader(); const chunks: Buffer[] = []; let total = 0; try { for (;;) { const { done, value } = await reader.read(); if (done) break; total += value.byteLength; if (total > cap) { await reader.cancel().catch(() => {}); throw new Error("The downloaded file exceeds the 200MB size limit."); } chunks.push(Buffer.from(value)); } } finally { reader.releaseLock(); } return Buffer.concat(chunks); }
+async function readBodyWithCap(response: Response, cap: number): Promise<Buffer> { if (!response.body) throw new Error("Empty response body from CDN."); return readStreamWithCap(response.body, cap, () => new Error("The downloaded file exceeds the 200MB size limit.")); }
 function verifyBookBuffer(buffer: Buffer, filename: string) { const isPdf = filename.toLowerCase().endsWith(".pdf") || buffer.toString("binary", 0, 4) === "%PDF"; if (isPdf) throw new Error("PDF format detected. Only EPUB ebooks are supported to guarantee high-quality layout and multi-voice generation."); if (!isZipBuffer(buffer)) throw new Error("The file is corrupted or is not a valid EPUB zip archive."); }
 function errorResText(text: string): string {
   try {

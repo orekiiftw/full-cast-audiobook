@@ -1,3 +1,5 @@
+import { readStreamWithCap } from "./readStream";
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function isUuid(value: unknown): value is string {
@@ -66,7 +68,6 @@ export class ValidationError extends Error {
     this.name = "ValidationError";
   }
 }
-
 /** Default cap (bytes) for any request body parsed into memory. */
 export const DEFAULT_BODY_LIMIT_BYTES = 5 * 1024 * 1024; // 5 MB
 
@@ -85,7 +86,8 @@ export async function readBodyWithLimit(
     throw new ValidationError("Request body too large.");
   }
 
-  if (!req.body) {
+  const bodyStream = req.body;
+  if (!bodyStream) {
     // No streaming body (e.g. no-body or already-consumed): fall back to text.
     const text = await req.text();
     if (Buffer.byteLength(text) > limitBytes) {
@@ -94,32 +96,7 @@ export async function readBodyWithLimit(
     return Buffer.from(text);
   }
 
-  const reader = req.body.getReader();
-  const chunks: Buffer[] = [];
-  let total = 0;
-  let exceeded = false;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > limitBytes) {
-        exceeded = true;
-        break;
-      }
-      chunks.push(Buffer.from(value));
-    }
-  } finally {
-    if (exceeded) {
-      await reader.cancel().catch(() => {});
-    }
-    reader.releaseLock();
-  }
-
-  if (exceeded) {
-    throw new ValidationError("Request body too large.");
-  }
-  return Buffer.concat(chunks);
+  return readStreamWithCap(bodyStream, limitBytes, () => new ValidationError("Request body too large."));
 }
 
 /** Parses a JSON body bounded by readBodyWithLimit. */

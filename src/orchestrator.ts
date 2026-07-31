@@ -16,6 +16,7 @@ import { deleteFile, downloadFile, uploadFile } from "./r2";
 import { DEFAULT_NARRATOR_VOICE, EPUB_LIMITS, PIPELINE, QUEUE, TEMP, TORRENT } from "./lib/constants";
 import { synthesizeSegmentAudio } from "./lib/voiceSegment";
 import { getBookVoiceContext, invalidateBookVoiceContext } from "./lib/bookCache";
+import { readStreamWithCap } from "./lib/readStream";
 import { isZipBuffer } from "./lib/validators";
 import {
   emitProgressEvent,
@@ -315,27 +316,13 @@ async function runIngestionJob(job: Job<IngestionJobData>): Promise<void> {
 }
 
 async function readAcquiredEpub(stream: ReadableStream<Uint8Array>, maxBytes: number, expectedSha256?: string): Promise<Buffer> {
-  const reader = stream.getReader();
-  const chunks: Buffer[] = [];
-  let bytes = 0;
   const hash = createHash("sha256");
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      bytes += value.byteLength;
-      if (bytes > maxBytes) {
-        await reader.cancel().catch(() => {});
-        throw new UnsupportedFormatError("The provider file exceeds the 200MB EPUB limit.");
-      }
-      const chunk = Buffer.from(value);
-      chunks.push(chunk);
-      hash.update(chunk);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const buffer = Buffer.concat(chunks);
+  const buffer = await readStreamWithCap(
+    stream,
+    maxBytes,
+    () => new UnsupportedFormatError("The provider file exceeds the 200MB EPUB limit."),
+    (chunk) => hash.update(chunk)
+  );
   if (expectedSha256 && hash.digest("hex").toLowerCase() !== expectedSha256.toLowerCase()) {
     throw new UnsupportedFormatError("Provider file hash verification failed.");
   }
