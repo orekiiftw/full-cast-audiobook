@@ -109,13 +109,14 @@ export async function registerBookRoutes(req: Request, path: string, user: AuthU
       author = String(body.author ?? "");
       magnetOrHash = String(body.magnet ?? "");
       if (body.providerBook && typeof body.providerBook === "object" && !Array.isArray(body.providerBook)) {
-        providerBook = body.providerBook as BookResult;
-        if (typeof providerBook.id !== "string" || typeof providerBook.provider !== "string" || typeof providerBook.title !== "string" || !Array.isArray(providerBook.authors) || typeof providerBook.format !== "string") {
+        // Field checks run against unknown before anything is trusted as BookResult.
+        const requested = body.providerBook as Record<string, unknown>;
+        if (typeof requested.id !== "string" || typeof requested.provider !== "string" || typeof requested.title !== "string" || !Array.isArray(requested.authors) || typeof requested.format !== "string") {
           throw new ValidationError("providerBook is malformed");
         }
         // Resolve the opaque provider ID server-side. Never pass client-provided
         // mirrors, URLs, metadata, or format values into acquisition.
-        providerBook = await bookProviders.getBook(providerBook.provider, providerBook.id);
+        providerBook = await bookProviders.getBook(requested.provider, requested.id);
         title ||= providerBook.title;
         author ||= providerBook.authors.join(", ");
       }

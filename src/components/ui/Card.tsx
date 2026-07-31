@@ -1,9 +1,9 @@
-import type { ReactNode, MouseEvent } from "react";
+import type { ReactNode, MouseEvent, KeyboardEvent } from "react";
 
 interface CardProps {
   children: ReactNode;
   className?: string;
-  onClick?: (e: MouseEvent<HTMLDivElement>) => void;
+  onClick?: (e: MouseEvent<HTMLDivElement> | KeyboardEvent<HTMLDivElement>) => void;
   isInteractive?: boolean;
 }
 
@@ -18,7 +18,7 @@ export function Card({ children, className = "", onClick, isInteractive = false 
           ? (e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
-                onClick(e as unknown as MouseEvent<HTMLDivElement>);
+                onClick(e);
               }
             }
           : undefined

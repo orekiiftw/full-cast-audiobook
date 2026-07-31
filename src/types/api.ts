@@ -84,12 +84,69 @@ export type PipelineEventType =
   | "quota_exceeded"
   | "progress_log";
 
-export interface PipelineEvent {
+interface PipelineEventBase {
   bookId: string;
-  type: PipelineEventType;
   timestamp: number;
-  [key: string]: unknown;
 }
+
+export interface StatusChangeEvent extends PipelineEventBase {
+  type: "status_change";
+  status: BookStatus;
+  message?: string;
+  error?: string;
+}
+
+export interface ChapterStatusEvent extends PipelineEventBase {
+  type: "chapter_status";
+  chapterId: string;
+  status: ChapterStatus;
+  chapterIndex?: number;
+  message?: string;
+  error?: string;
+  audioR2Key?: string;
+  durationMs?: number;
+}
+
+export interface SegmentReadyEvent extends PipelineEventBase {
+  type: "segment_ready";
+  chapterId: string;
+  chapterIndex: number;
+  segmentId: string;
+  segmentIndex: number;
+  audioR2Key: string;
+  done: number;
+  total: number;
+  voicedCount: number;
+}
+
+export interface SegmentFailedEvent extends PipelineEventBase {
+  type: "segment_failed";
+  segmentId: string;
+  chapterId: string;
+  error: string;
+}
+
+export interface QuotaExceededEvent extends PipelineEventBase {
+  type: "quota_exceeded";
+  message?: string;
+}
+
+export interface ProgressLogEvent extends PipelineEventBase {
+  type: "progress_log";
+  message: string;
+}
+
+/**
+ * Discriminated on `type` — consumers narrow to the exact payload shape, so a
+ * typo'd property is a compile error instead of a silent `undefined`.
+ */
+export type PipelineEvent =
+  | StatusChangeEvent
+  | ChapterStatusEvent
+  | SegmentReadyEvent
+  | SegmentFailedEvent
+  | QuotaExceededEvent
+  | ProgressLogEvent;
 
 export interface ApiError {
   error: string;

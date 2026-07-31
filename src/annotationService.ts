@@ -200,8 +200,9 @@ Current Segment Text to Annotate:
     }
 
     return result;
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Annotation parse failed. Raw response length:", rawText.length);
-    throw new Error(`Failed to parse annotation JSON response: ${err.message}`);
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to parse annotation JSON response: ${detail}`);
   }
 }

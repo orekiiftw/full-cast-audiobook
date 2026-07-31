@@ -262,7 +262,7 @@ export async function streamFile(key: string, range: StreamRange | null, knownSi
     );
 
     const body = get.Body as
-      | { transformToWebStream?: () => ReadableStream<Uint8Array>; getReader?: () => any }
+      | { transformToWebStream?: () => ReadableStream<Uint8Array>; getReader?: () => ReadableStreamDefaultReader<Uint8Array> }
       | undefined;
     if (!body) {
       throw new Error(`File not found: ${key}`);
@@ -270,22 +270,28 @@ export async function streamFile(key: string, range: StreamRange | null, knownSi
 
     // AWS SDK v3 S3 Body exposes transformToWebStream(); fall back to a
     // Node Readable → web stream adapter if the runtime lacks it.
+    interface NodeReadableLike {
+      pipe?: unknown;
+      on(event: "data", cb: (chunk: Uint8Array | Buffer) => void): void;
+      on(event: "end" | "error", cb: (err?: unknown) => void): void;
+      destroy?(reason?: unknown): void;
+    }
     let stream: ReadableStream<Uint8Array>;
     if (typeof body.transformToWebStream === "function") {
       stream = body.transformToWebStream();
-    } else if (typeof (get.Body as any).pipe === "function") {
+    } else if (typeof (get.Body as NodeReadableLike | undefined)?.pipe === "function") {
+      const nodeStream = get.Body as unknown as NodeReadableLike;
       stream = new ReadableStream({
         start(controller) {
-          const nodeStream = get.Body as any;
           nodeStream.on("data", (chunk: Uint8Array | Buffer) =>
-            controller.enqueue(new Uint8Array(chunk as Uint8Array))
+            controller.enqueue(new Uint8Array(chunk))
           );
           nodeStream.on("end", () => controller.close());
           nodeStream.on("error", (err: unknown) => controller.error(err));
         },
         cancel(reason) {
           try {
-            (get.Body as any).destroy?.(reason);
+            nodeStream.destroy?.(reason);
           } catch {
             // best-effort
           }

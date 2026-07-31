@@ -185,19 +185,15 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
   const handlePipelineEvent = useCallback(
     (payload: PipelineEvent) => {
       if (payload.type === "progress_log") {
-        if (typeof payload.message === "string") pushLog(payload.message);
+        pushLog(payload.message);
         return;
       }
 
       if (payload.type === "status_change") {
         setData((prev) =>
-          prev ? { ...prev, book: { ...prev.book, status: payload.status as Book["status"] } } : prev
+          prev ? { ...prev, book: { ...prev.book, status: payload.status } } : prev
         );
-        pushLog(
-          typeof payload.message === "string"
-            ? payload.message
-            : `System status: ${String(payload.status)}`
-        );
+        pushLog(payload.message ?? `System status: ${payload.status}`);
         void fetchDetails();
         return;
       }
@@ -211,9 +207,9 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
               ch.id === payload.chapterId
                 ? {
                     ...ch,
-                    status: payload.status as Chapter["status"],
-                    durationMs: (payload.durationMs as number | undefined) ?? ch.durationMs,
-                    audioR2Key: (payload.audioR2Key as string | undefined) ?? ch.audioR2Key,
+                    status: payload.status,
+                    durationMs: payload.durationMs ?? ch.durationMs,
+                    audioR2Key: payload.audioR2Key ?? ch.audioR2Key,
                   }
                 : ch
             ),
@@ -223,35 +219,25 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
       }
 
       if (payload.type === "segment_failed") {
-        pushLog(
-          `Segment failed: ${typeof payload.error === "string" ? payload.error : "unknown error"}`
-        );
+        pushLog(`Segment failed: ${payload.error}`);
         return;
       }
 
       if (payload.type === "quota_exceeded") {
-        pushLog(
-          typeof payload.message === "string"
-            ? payload.message
-            : "TTS quota exhausted — generation paused."
-        );
+        pushLog(payload.message ?? "TTS quota exhausted — generation paused.");
         return;
       }
 
       if (payload.type === "segment_ready") {
-        const chapterId = payload.chapterId as string;
-        const eventDone =
-          typeof payload.done === "number"
-            ? payload.done
-            : typeof payload.voicedCount === "number"
-              ? payload.voicedCount
-              : null;
-        const eventTotal = typeof payload.total === "number" ? payload.total : null;
+        const chapterId = payload.chapterId;
+        // Producers always emit done/total counters with segment_ready.
+        const eventDone = payload.done;
+        const eventTotal = payload.total;
 
         setSegmentCountInfo((prev) => {
           const current = prev[chapterId] || { total: 0, done: 0 };
-          const total = eventTotal ?? current.total;
-          const nextDone = eventDone != null ? eventDone : current.done + 1;
+          const total = eventTotal > 0 ? eventTotal : current.total;
+          const nextDone = eventDone;
           return {
             ...prev,
             [chapterId]: {
