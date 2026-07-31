@@ -6,7 +6,7 @@ import { Skeleton } from "./ui/Skeleton";
 import { Icon } from "./ui/Icon";
 import { useToast } from "./ui/Toast";
 import { useSSE } from "../hooks/useSSE";
-import { apiFetch } from "../lib/api";
+import { apiFetch, reportNetworkError } from "../lib/api";
 import { formatDuration } from "../lib/format";
 import type {
   Book,
@@ -364,8 +364,7 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
         showToast("Failed to save pronunciation.", "error");
       }
     } catch (err) {
-      console.error(err);
-      showToast("Network error occurred.", "error");
+      reportNetworkError(err, showToast);
     } finally {
       setAddingPron(false);
     }
@@ -457,8 +456,7 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
       setProgressLog([]);
       await fetchDetails();
     } catch (err) {
-      console.error(err);
-      showToast("Network error occurred.", "error");
+      reportNetworkError(err, showToast);
     } finally {
       setRetrying(false);
     }
@@ -477,8 +475,7 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
       showToast("Book deleted.");
       onBack();
     } catch (err) {
-      console.error(err);
-      showToast("Network error occurred.", "error");
+      reportNetworkError(err, showToast);
     } finally {
       setDeleting(false);
     }

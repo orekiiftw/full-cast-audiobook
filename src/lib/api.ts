@@ -34,6 +34,14 @@ export function authUserFromResponse(payload: AuthResponse | AuthUser): AuthUser
   return candidate;
 }
 
+type ShowToast = (message: string, tone?: "info" | "error") => void;
+
+/** Standard handling for catch blocks around apiFetch: log for the console, toast for the user. */
+export function reportNetworkError(err: unknown, showToast: ShowToast): void {
+  console.error(err);
+  showToast("Network error occurred.", "error");
+}
+
 /** Only display plain, bounded backend error strings; never render server markup. */
 export async function safeApiError(
   response: Response,

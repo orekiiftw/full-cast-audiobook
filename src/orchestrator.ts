@@ -16,6 +16,7 @@ import { deleteFile, downloadFile, uploadFile } from "./r2";
 import { DEFAULT_NARRATOR_VOICE, EPUB_LIMITS, PIPELINE, QUEUE, TEMP, TORRENT } from "./lib/constants";
 import { synthesizeSegmentAudio } from "./lib/voiceSegment";
 import { getBookVoiceContext, invalidateBookVoiceContext } from "./lib/bookCache";
+import { isZipBuffer } from "./lib/validators";
 import {
   emitProgressEvent,
   enqueueIngestion,
@@ -122,7 +123,7 @@ async function runIngestionJob(job: Job<IngestionJobData>): Promise<void> {
           throw new UnsupportedFormatError("The provider file exceeds the 200MB EPUB limit.");
         }
         epubBuffer = await readAcquiredEpub(acquired.stream, maxBytes, acquired.expectedSha256);
-        if (epubBuffer.length < 4 || epubBuffer.readUInt32LE(0) !== 0x04034b50) {
+        if (!isZipBuffer(epubBuffer)) {
           throw new UnsupportedFormatError("The provider response is not a valid EPUB zip archive.");
         }
       }
@@ -863,6 +864,27 @@ async function maybeMarkBookComplete(bookId: string) {
 const LIVE_JOB_STATES = new Set(["wait", "delayed", "prioritized", "active", "waiting-children"]);
 
 /**
+ * Queued segments of in-progress books awaiting (re)materialization as BullMQ
+ * jobs — shared shape for the sweep's watermark refill and boot recovery
+ * paging. Callers append their own orderBy/limit/offset ($dynamic()).
+ */
+function queuedSegmentsQuery() {
+  return db
+    .select({
+      segmentId: segments.id,
+      chapterId: chapters.id,
+      bookId: chapters.bookId,
+      chapterIndex: chapters.chapterIndex,
+      segmentIndex: segments.segmentIndex,
+    })
+    .from(segments)
+    .innerJoin(chapters, eq(segments.chapterId, chapters.id))
+    .innerJoin(books, eq(chapters.bookId, books.id))
+    .where(and(eq(segments.status, "queued"), eq(books.status, "in_progress")))
+    .$dynamic();
+}
+
+/**
  * Self-healing pass over DB state that outlived its queue job. Each check is
  * idempotent and safe to run on any instance at any time:
  * 1. Segments stuck processing/annotated whose job is gone (Redis data loss,
@@ -932,18 +954,7 @@ export async function runPipelineSweep(): Promise<void> {
   const counts = await segmentQueue.getJobCounts("wait", "active", "delayed", "prioritized");
   const depth = counts.wait + counts.active + counts.delayed + counts.prioritized;
   if (depth < QUEUE.QUEUED_REFILL_WATERMARK) {
-    const queuedRows = await db
-      .select({
-        segmentId: segments.id,
-        chapterId: chapters.id,
-        bookId: chapters.bookId,
-        chapterIndex: chapters.chapterIndex,
-        segmentIndex: segments.segmentIndex,
-      })
-      .from(segments)
-      .innerJoin(chapters, eq(segments.chapterId, chapters.id))
-      .innerJoin(books, eq(chapters.bookId, books.id))
-      .where(and(eq(segments.status, "queued"), eq(books.status, "in_progress")))
+    const queuedRows = await queuedSegmentsQuery()
       .orderBy(asc(chapters.bookId), asc(chapters.chapterIndex), asc(segments.segmentIndex))
       .limit(2000);
     if (queuedRows.length > 0) {
@@ -1065,18 +1076,7 @@ export async function resumePendingWork() {
   let offset = 0;
   const PAGE = 5000;
   for (;;) {
-    const queuedRows = await db
-      .select({
-        segmentId: segments.id,
-        chapterId: chapters.id,
-        bookId: chapters.bookId,
-        chapterIndex: chapters.chapterIndex,
-        segmentIndex: segments.segmentIndex,
-      })
-      .from(segments)
-      .innerJoin(chapters, eq(segments.chapterId, chapters.id))
-      .innerJoin(books, eq(chapters.bookId, books.id))
-      .where(and(eq(segments.status, "queued"), eq(books.status, "in_progress")))
+    const queuedRows = await queuedSegmentsQuery()
       .orderBy(asc(segments.id))
       .limit(PAGE)
       .offset(offset);

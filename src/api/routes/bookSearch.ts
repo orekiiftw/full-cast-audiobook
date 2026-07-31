@@ -1,7 +1,7 @@
 import { bookProviders } from "../../acquisition";
 import { BookFormat, SearchQuery } from "../../acquisition/types";
 import { json } from "../response";
-import { readJsonWithLimit, ValidationError } from "../../lib/validators";
+import { boundedString, readJsonWithLimit, ValidationError } from "../../lib/validators";
 import { AuthUser } from "../../auth";
 
 const SEARCH_PATH = "/api/book-search";
@@ -16,11 +16,7 @@ const MAX_PROVIDER_LENGTH = 64;
  */
 const MAX_PROVIDER_BOOK_ID_LENGTH = 4096;
 
-function string(value: unknown, name: string): string | undefined {
-  if (value == null || value === "") return undefined;
-  if (typeof value !== "string" || value.length > MAX_QUERY_LENGTH) throw new ValidationError(`${name} must be a string of ${MAX_QUERY_LENGTH} characters or fewer`);
-  return value.trim() || undefined;
-}
+const string = (value: unknown, name: string) => boundedString(value, name, MAX_QUERY_LENGTH);
 function strings(value: unknown, name: string): string[] | undefined {
   if (value == null) return undefined;
   if (!Array.isArray(value) || value.some((x) => typeof x !== "string" || x.length > 32)) throw new ValidationError(`${name} must be an array of short strings`);

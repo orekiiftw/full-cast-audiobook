@@ -1,4 +1,5 @@
 import { TORRENT } from "./lib/constants";
+import { isZipBuffer } from "./lib/validators";
 
 const TORBOX_API_KEY = process.env.TORBOX_API_KEY;
 const MAIN_API_URL = "https://api.torbox.app/v1/api";
@@ -192,7 +193,7 @@ export async function downloadBookFromTorrent(magnetOrHash: string, onProgress?:
   return { buffer, filename };
 }
 async function readBodyWithCap(response: Response, cap: number): Promise<Buffer> { if (!response.body) throw new Error("Empty response body from CDN."); const reader = response.body.getReader(); const chunks: Buffer[] = []; let total = 0; try { for (;;) { const { done, value } = await reader.read(); if (done) break; total += value.byteLength; if (total > cap) { await reader.cancel().catch(() => {}); throw new Error("The downloaded file exceeds the 200MB size limit."); } chunks.push(Buffer.from(value)); } } finally { reader.releaseLock(); } return Buffer.concat(chunks); }
-function verifyBookBuffer(buffer: Buffer, filename: string) { const isPdf = filename.toLowerCase().endsWith(".pdf") || buffer.toString("binary", 0, 4) === "%PDF"; if (isPdf) throw new Error("PDF format detected. Only EPUB ebooks are supported to guarantee high-quality layout and multi-voice generation."); if (buffer.length < 4 || buffer.readUInt32LE(0) !== 0x04034b50) throw new Error("The file is corrupted or is not a valid EPUB zip archive."); }
+function verifyBookBuffer(buffer: Buffer, filename: string) { const isPdf = filename.toLowerCase().endsWith(".pdf") || buffer.toString("binary", 0, 4) === "%PDF"; if (isPdf) throw new Error("PDF format detected. Only EPUB ebooks are supported to guarantee high-quality layout and multi-voice generation."); if (!isZipBuffer(buffer)) throw new Error("The file is corrupted or is not a valid EPUB zip archive."); }
 function errorResText(text: string): string {
   try {
     const parsed = JSON.parse(text) as { detail?: unknown; error?: unknown };

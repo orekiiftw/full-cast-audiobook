@@ -30,6 +30,20 @@ export function optionalString(obj: Record<string, unknown>, key: string): strin
   return value;
 }
 
+/** Optional, trimmed, length-bounded free-text field from a request body. */
+export function boundedString(value: unknown, name: string, maxLength: number): string | undefined {
+  if (value == null || value === "") return undefined;
+  if (typeof value !== "string" || value.length > maxLength) {
+    throw new ValidationError(`${name} must be a string of ${maxLength} characters or fewer`);
+  }
+  return value.trim() || undefined;
+}
+
+/** PK\x03\x04 — the local file header signature every ZIP (and EPUB) starts with. */
+export function isZipBuffer(buffer: Buffer): boolean {
+  return buffer.length >= 4 && buffer.readUInt32LE(0) === 0x04034b50;
+}
+
 export function requireString(obj: Record<string, unknown>, key: string): string {
   const value = requireField<unknown>(obj, key);
   if (typeof value !== "string" || value.length === 0) {

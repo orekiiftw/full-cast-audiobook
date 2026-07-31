@@ -2,7 +2,7 @@ import { useState } from "react";
 import { apiFetch, authUserFromResponse, safeApiError } from "../lib/api";
 import type { AuthMode, AuthResponse, AuthUser } from "../types/api";
 import { Button } from "./ui/Button";
-import { Icon } from "./ui/Icon";
+import { BrandLogo } from "./ui/BrandLogo";
 
 interface AuthScreenProps {
   onAuthenticated: (user: AuthUser) => void;
@@ -94,14 +94,7 @@ export default function AuthScreen({ onAuthenticated, sessionExpired = false }: 
 
       <div className="relative z-10 mx-auto grid min-h-screen max-w-6xl items-center gap-12 px-5 py-10 sm:px-6 lg:grid-cols-[1.08fr_0.92fr] lg:gap-20 lg:py-16">
         <section className="hidden lg:block animate-fade-up" aria-labelledby="auth-intro-title">
-          <div className="mb-10 flex items-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-gold-300 via-gold-500 to-gold-700 shadow-glow-sm">
-              <Icon name="sparkle" size={18} className="text-cinema-950" />
-            </span>
-            <span className="font-display text-base font-semibold uppercase tracking-[0.24em] text-gradient">
-              Narratea
-            </span>
-          </div>
+          <BrandLogo size="lg" className="mb-10" />
           <p className="label-caps mb-5 text-gold-400">Your private listening room</p>
           <h1 id="auth-intro-title" className="max-w-xl font-serif text-5xl font-medium leading-[1.06] tracking-tight text-gradient xl:text-6xl">
             Every story, performed.
@@ -116,14 +109,7 @@ export default function AuthScreen({ onAuthenticated, sessionExpired = false }: 
         </section>
 
         <section className="mx-auto w-full max-w-md animate-fade-up" aria-labelledby="auth-title">
-          <div className="mb-8 flex items-center justify-center gap-3 lg:hidden">
-            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-gold-300 via-gold-500 to-gold-700 shadow-glow-sm">
-              <Icon name="sparkle" size={17} className="text-cinema-950" />
-            </span>
-            <span className="font-display text-[15px] font-semibold uppercase tracking-[0.22em] text-gradient">
-              Narratea
-            </span>
-          </div>
+          <BrandLogo size="md" className="mb-8 justify-center lg:hidden" />
 
           <div className="glass-strong relative overflow-hidden rounded-[2rem] p-6 shadow-elevated sm:p-8">
             <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-gold-300/50 to-transparent" />

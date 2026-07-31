@@ -4,6 +4,7 @@ import BookDetail from "./components/BookDetail";
 import Player from "./components/Player";
 import AuthScreen from "./components/AuthScreen";
 import { Button } from "./components/ui/Button";
+import { BrandLogo } from "./components/ui/BrandLogo";
 import { Icon } from "./components/ui/Icon";
 import { useToast } from "./components/ui/Toast";
 import { AUTH_EXPIRED_EVENT, apiFetch, authUserFromResponse } from "./lib/api";
@@ -140,14 +141,7 @@ function BootShell() {
     <div className="min-h-screen text-cinema-100 flex flex-col font-sans grainy" aria-busy="true" aria-label="Restoring your Narratea session">
       <header className="app-header sticky top-0 z-40 border-b border-white/[0.04]">
         <div className="max-w-6xl mx-auto px-5 sm:px-6 h-16 flex justify-between items-center gap-4">
-          <span className="flex items-center gap-3 shrink-0">
-            <span className="w-9 h-9 rounded-2xl bg-gradient-to-br from-gold-300 via-gold-500 to-gold-700 flex items-center justify-center shadow-glow-sm">
-              <Icon name="sparkle" size={16} className="text-cinema-950" />
-            </span>
-            <span className="font-display text-[15px] font-semibold tracking-[0.2em] uppercase text-gradient">
-              Narratea
-            </span>
-          </span>
+          <BrandLogo />
         </div>
       </header>
       <main className="flex-1 relative z-10 pb-16">
@@ -393,12 +387,7 @@ function AuthenticatedApp({ user, onLogout, bootBooks }: AuthenticatedAppProps) 
       <header className="app-header sticky top-0 z-40 border-b border-white/[0.04]">
         <div className="max-w-6xl mx-auto px-5 sm:px-6 h-16 flex justify-between items-center gap-4">
           <button className="flex items-center gap-3 group shrink-0" onClick={handleBackToLibrary} aria-label="Go to library">
-            <span className="w-9 h-9 rounded-2xl bg-gradient-to-br from-gold-300 via-gold-500 to-gold-700 flex items-center justify-center shadow-glow-sm transition-transform duration-500 ease-out-expo group-hover:scale-105 group-hover:rotate-6">
-              <Icon name="sparkle" size={16} className="text-cinema-950" />
-            </span>
-            <span className="font-display text-[15px] font-semibold tracking-[0.2em] uppercase text-gradient">
-              Narratea
-            </span>
+            <BrandLogo />
           </button>
 
           <div className="flex min-w-0 items-center gap-2 sm:gap-4">

@@ -5,7 +5,7 @@ import { Modal } from "./ui/Modal";
 import { Skeleton } from "./ui/Skeleton";
 import { Icon } from "./ui/Icon";
 import { useToast } from "./ui/Toast";
-import { apiFetch } from "../lib/api";
+import { apiFetch, reportNetworkError } from "../lib/api";
 import type { Book } from "../types/api";
 
 interface LibraryProps {
@@ -182,8 +182,7 @@ export default function Library({ onSelectBook, bootBooks }: LibraryProps) {
         showToast(err.error || "Failed to add book.", "error");
       }
     } catch (err) {
-      console.error(err);
-      showToast("Network error occurred.", "error");
+      reportNetworkError(err, showToast);
     } finally {
       setSubmitting(false);
     }
@@ -210,8 +209,7 @@ export default function Library({ onSelectBook, bootBooks }: LibraryProps) {
       setBooks((prev) => prev.filter((b) => b.id !== bookId));
       showToast("Book deleted.");
     } catch (err) {
-      console.error(err);
-      showToast("Network error occurred.", "error");
+      reportNetworkError(err, showToast);
     }
   };
 
