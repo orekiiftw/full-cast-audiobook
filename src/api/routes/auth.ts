@@ -42,8 +42,7 @@ function verifyAgainstDummy(password: string): Promise<boolean> {
     .catch(() => false);
 }
 
-function rateLimited(req: Request, route: string, connectionIp: string): boolean {
-  void req;
+function rateLimited(route: string, connectionIp: string): boolean {
   const now = Date.now();
   sweepAttempts(now);
   const key = `${route}:${connectionIp}`;
@@ -56,13 +55,13 @@ function rateLimited(req: Request, route: string, connectionIp: string): boolean
   return entry.count > MAX_ATTEMPTS;
 }
 
-function withCookie(req: Request, data: unknown, cookie: string, status = 200): Response {
-  return json(data, status, { "Set-Cookie": cookie, "Cache-Control": "no-store" }, req);
+function withCookie(data: unknown, cookie: string, status = 200): Response {
+  return json(data, status, { "Set-Cookie": cookie, "Cache-Control": "no-store" });
 }
 
 export async function registerAuthRoutes(req: Request, path: string, user: AuthUser | null, connectionIp: string = "unknown"): Promise<Response | null> {
   if ((path === "/api/auth/signup" || path === "/api/auth/login") && req.method === "POST") {
-    if (rateLimited(req, path, connectionIp)) return json({ error: "Too many attempts. Try again later." }, 429, {}, req);
+    if (rateLimited(path, connectionIp)) return json({ error: "Too many attempts. Try again later." }, 429);
     const body = (await readJsonWithLimit(req)) as Record<string, unknown>;
     const email = normalizeEmail(typeof body.email === "string" ? body.email : "");
     const password = typeof body.password === "string" ? body.password : "";
@@ -73,10 +72,10 @@ export async function registerAuthRoutes(req: Request, path: string, user: AuthU
       // server back down. A server exposed beyond loopback with open signup
       // lets strangers create accounts and burn your TTS/LLM spend.
       if (process.env.REGISTRATION_ENABLED !== "true") {
-        return json({ error: "Account registration is disabled." }, 403, {}, req);
+        return json({ error: "Account registration is disabled." }, 403);
       }
       if (!isValidEmail(email) || !isValidPassword(password)) {
-        return json({ error: "Use a valid email and a password between 12 and 128 characters." }, 400, {}, req);
+        return json({ error: "Use a valid email and a password between 12 and 128 characters." }, 400);
       }
       let created;
       try {
@@ -86,12 +85,12 @@ export async function registerAuthRoutes(req: Request, path: string, user: AuthU
         }).returning({ id: users.id, email: users.email }).then((rows) => rows[0]);
       } catch (error) {
         if ((error as { code?: string }).code === "23505") {
-          return json({ error: "An account with that email already exists. Sign in instead." }, 409, {}, req);
+          return json({ error: "An account with that email already exists. Sign in instead." }, 409);
         }
         throw error;
       }
       const session = await createSession(created.id);
-      return withCookie(req, { user: created }, sessionCookie(req, session.token, session.expiresAt), 201);
+      return withCookie({ user: created }, sessionCookie(req, session.token, session.expiresAt), 201);
     }
 
     const account = isValidEmail(email)
@@ -109,13 +108,13 @@ export async function registerAuthRoutes(req: Request, path: string, user: AuthU
     // Rotate on every login: revoke all prior sessions for this user so a
     // cookie stolen before this login is invalidated immediately.
     const session = await createSessionRotating(account.id);
-    return withCookie(req, { user: { id: account.id, email: account.email } }, sessionCookie(req, session.token, session.expiresAt));
+    return withCookie({ user: { id: account.id, email: account.email } }, sessionCookie(req, session.token, session.expiresAt));
   }
 
   if (path === "/api/auth/logout" && req.method === "POST") {
     const token = readSessionToken(req);
     if (token) await db.delete(sessions).where(eq(sessions.tokenHash, hashSessionToken(token)));
-    return withCookie(req, { success: true }, clearSessionCookie(req));
+    return withCookie({ success: true }, clearSessionCookie(req));
   }
 
   if (path === "/api/auth/me" && req.method === "GET") {

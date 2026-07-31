@@ -13,7 +13,7 @@ import { segmentChapter } from "./segmentService";
 import { annotateSegment, createNeutralBeat, extractBeats } from "./annotationService";
 import { stitchChapter } from "./stitchService";
 import { deleteFile, downloadFile, uploadFile } from "./r2";
-import { DEFAULT_NARRATOR_VOICE, EPUB_LIMITS, PIPELINE, QUEUE, TEMP } from "./lib/constants";
+import { DEFAULT_NARRATOR_VOICE, EPUB_LIMITS, PIPELINE, QUEUE, TEMP, TORRENT } from "./lib/constants";
 import { synthesizeSegmentAudio } from "./lib/voiceSegment";
 import { getBookVoiceContext, invalidateBookVoiceContext } from "./lib/bookCache";
 import {
@@ -117,7 +117,7 @@ async function runIngestionJob(job: Job<IngestionJobData>): Promise<void> {
         if (acquired.contentType && !/application\/epub\+zip|application\/zip|application\/octet-stream/i.test(acquired.contentType)) {
           throw new UnsupportedFormatError(`Unexpected provider content type: ${acquired.contentType}`);
         }
-        const maxBytes = 200 * 1024 * 1024;
+        const maxBytes = TORRENT.MAX_FILE_SIZE_BYTES;
         if (acquired.contentLength && acquired.contentLength > maxBytes) {
           throw new UnsupportedFormatError("The provider file exceeds the 200MB EPUB limit.");
         }

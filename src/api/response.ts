@@ -23,8 +23,7 @@ function corsHeaders(): Record<string, string> {
   };
 }
 
-export function json<T>(data: T, status = 200, extraHeaders: Record<string, string> = {}, req?: Request): Response {
-  void req; // kept for call-site compatibility; CORS headers are origin-agnostic (see above)
+export function json<T>(data: T, status = 200, extraHeaders: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
@@ -39,8 +38,7 @@ export function json<T>(data: T, status = 200, extraHeaders: Record<string, stri
   });
 }
 
-export function corsPreflight(req: Request): Response {
-  void req;
+export function corsPreflight(): Response {
   return new Response(null, {
     status: 204,
     headers: corsHeaders(),

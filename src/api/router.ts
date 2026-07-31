@@ -84,7 +84,7 @@ export async function handleRequest(req: Request, connectionIp = "unknown"): Pro
   const path = new URL(req.url).pathname;
 
   if (req.method === "OPTIONS") {
-    return corsPreflight(req);
+    return corsPreflight();
   }
 
   const blocked = csrfGuard(req);
