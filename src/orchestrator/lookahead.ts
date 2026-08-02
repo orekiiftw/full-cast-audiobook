@@ -24,28 +24,31 @@ export interface LookaheadAnchor {
 
 /**
  * Just-in-time scheduling: promote the first PIPELINE.LOOKAHEAD_SEGMENTS
- * unvoiced segments at/after the listener's anchor from "pending" to
- * "queued" and give each a BullMQ job. Everything further out stays
- * "pending" — no job, no TTS spend — until listening actually approaches it.
- * Seeking re-centers the window, so skipped-ahead parts voice from there and
- * abandoned parts are never paid for.
+ * unvoiced segments at/after the anchor from "pending" to "queued" and give
+ * each a BullMQ job. Everything further out stays "pending" — no job, no
+ * TTS spend — until the window advances onto it.
  *
- * Drivers: ingestion (anchor = book start), PUT /api/playback (anchor = the
- * listener's current line), and GET /api/chapters/:id/segments?at= (anchor =
- * the line the buffering player is waiting on). Idempotent: promotion is an
- * atomic pending→queued update and BullMQ dedupes on the segment-id jobId,
- * so overlapping calls can never double-schedule.
+ * Drivers: ingestion (anchor = book start), segment completion (top-up so
+ * the opening window cannot drain and freeze the book), PUT /api/playback
+ * (listener position), GET /api/chapters/:id/segments?at= (buffering player),
+ * and the maintenance sweep (drained in_progress books). Idempotent:
+ * promotion is an atomic pending→queued update and BullMQ dedupes on the
+ * segment-id jobId, so overlapping calls can never double-schedule.
  */
 export async function ensureLookahead(
   bookId: string,
-  anchor: LookaheadAnchor = { chapterIndex: 1, segmentIndex: 1 }
+  anchor: LookaheadAnchor = { chapterIndex: 1, segmentIndex: 1 },
+  opts: { /** Skip the HTTP-poll throttle (segment completion / sweep). */ force?: boolean } = {}
 ): Promise<void> {
   const throttleKey = `${bookId}:${anchor.chapterIndex}`;
   const now = Date.now();
-  if (now - (lookaheadThrottle.get(throttleKey) ?? 0) < LOOKAHEAD_THROTTLE_MS) {
+  // Playback/segment polls arrive every 1–8s; coalescing them is pure win.
+  // Completion-driven top-ups must not share that throttle or a burst of
+  // finished segments leaves the window half-empty until the next poll.
+  if (!opts.force && now - (lookaheadThrottle.get(throttleKey) ?? 0) < LOOKAHEAD_THROTTLE_MS) {
     return;
   }
-  lookaheadThrottle.set(throttleKey, now);
+  if (!opts.force) lookaheadThrottle.set(throttleKey, now);
   // Soft cap so a long-lived process doesn't accumulate stale keys.
   if (lookaheadThrottle.size > 5000) lookaheadThrottle.clear();
 

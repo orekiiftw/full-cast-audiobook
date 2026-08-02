@@ -13,6 +13,7 @@ import { PIPELINE } from "../lib/constants";
 import { synthesizeSegmentAudio } from "../lib/voiceSegment";
 import { getBookVoiceContext } from "../lib/bookCache";
 import { emitProgressEvent, enqueueStitch, type SegmentJobData } from "../queue";
+import { ensureLookahead } from "./lookahead";
 
 /**
  * Atomically claim a segment for this worker.
@@ -242,6 +243,18 @@ export async function runSegmentJob(job: Job<SegmentJobData>): Promise<void> {
     ) {
       await enqueueStitch({ bookId, chapterId, chapterIndex });
     }
+
+    // Keep the just-in-time window full: each completion frees a slot, so top
+    // up from this line forward. Without this the opening LOOKAHEAD_SEGMENTS
+    // drain and the rest of the book stays "pending" forever until a listener
+    // happens to poll — breaking progressive background generation.
+    ensureLookahead(
+      bookId,
+      { chapterIndex, segmentIndex: segmentData.segmentIndex },
+      { force: true }
+    ).catch((err) =>
+      console.warn(`⚠️ ensureLookahead after segment ${segmentId} failed:`, err)
+    );
   } catch (error: unknown) {
     console.error(`❌ Failed to voice segment ${segmentId}:`, error);
 
@@ -309,6 +322,15 @@ export async function runSegmentJob(job: Job<SegmentJobData>): Promise<void> {
         ) {
           await enqueueStitch({ bookId, chapterId, chapterIndex: job.data.chapterIndex });
         }
+        // A permanent failure also frees a lookahead slot — promote the next
+        // pending lines so one bad paragraph cannot stall the whole book.
+        ensureLookahead(
+          bookId,
+          { chapterIndex: job.data.chapterIndex, segmentIndex: job.data.segmentIndex },
+          { force: true }
+        ).catch((err) =>
+          console.warn(`⚠️ ensureLookahead after failed segment ${segmentId}:`, err)
+        );
       }
     } else {
       // Non-terminal failures go back to "queued" so BullMQ's delayed retry can
