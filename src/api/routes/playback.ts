@@ -1,6 +1,6 @@
 import { db } from "../../db";
 import { playbackState } from "../../schema";
-import { ensureLookahead } from "../../orchestrator";
+import { ensureChapterLookahead } from "../../orchestrator";
 import { json } from "../response";
 import { readJsonWithLimit, requireNumber, requireUuid, ValidationError } from "../../lib/validators";
 import { AuthUser } from "../../auth";
@@ -52,12 +52,11 @@ export async function registerPlaybackRoutes(req: Request, path: string, user: A
       },
     });
 
-  // Keep the voicing window just ahead of the listener (fire-and-forget —
-  // the sync response must not wait on scheduling).
-  ensureLookahead(bookId, {
-    chapterIndex: chapter.chapter.chapterIndex,
-    segmentIndex: segmentIndex ?? 1,
-  }).catch(console.error);
+  // Transcribe the current chapter fully + the next chapter so playback is
+  // uninterrupted and the next chapter is ready when the listener reaches it.
+  // Nothing beyond N+1 is scheduled until the listener advances, capping TTS
+  // spend at two chapters ahead. (fire-and-forget — sync must not wait on it.)
+  ensureChapterLookahead(bookId, chapter.chapter.chapterIndex).catch(console.error);
 
   return json({ success: true });
 }

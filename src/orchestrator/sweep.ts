@@ -7,7 +7,6 @@ import { db } from "../db";
 import { books, chapters, segments } from "../schema";
 import { PIPELINE, QUEUE } from "../lib/constants";
 import { emitProgressEvent, enqueueSegmentJobs, enqueueStitch, ingestJobId, ingestionQueue, segmentJobId, segmentQueue } from "../queue";
-import { ensureLookahead } from "./lookahead";
 
 /** Job states in which BullMQ owns the row's lifecycle — never touch these. */
 const LIVE_JOB_STATES = new Set(["wait", "delayed", "prioritized", "active", "waiting-children"]);
@@ -150,42 +149,7 @@ export async function runPipelineSweep(): Promise<void> {
     }
   }
 
-  // 4. Drained lookahead: in_progress books that still have pending segments
-  //    but nothing queued/processing/annotated. The opening window emptied
-  //    (crash between voice and refill, or a pre-fix stuck book) and nothing
-  //    is left to drive ensureLookahead. Re-prime from book start.
-  const drainedBooks = await db
-    .select({ id: books.id })
-    .from(books)
-    .where(
-      and(
-        eq(books.status, "in_progress"),
-        // At least one pending segment exists…
-        sql`exists (
-          select 1 from segments s
-          join chapters c on s.chapter_id = c.id
-          where c.book_id = ${books.id} and s.status = 'pending'
-        )`,
-        // …and nothing is currently in the voicing pipeline.
-        sql`not exists (
-          select 1 from segments s
-          join chapters c on s.chapter_id = c.id
-          where c.book_id = ${books.id}
-            and s.status in ('queued', 'processing', 'annotated')
-        )`
-      )
-    )
-    .limit(100);
-  for (const book of drainedBooks) {
-    try {
-      await ensureLookahead(book.id, { chapterIndex: 1, segmentIndex: 1 }, { force: true });
-      console.warn(`🧹 Sweep re-primed drained lookahead for book ${book.id}.`);
-    } catch (err) {
-      console.error(`Sweep failed to re-prime lookahead for book ${book.id}:`, err);
-    }
-  }
-
-  // 5. Ingestions whose worker died before marking the book failed. The
+  // 4. Ingestions whose worker died before marking the book failed. The
   //    createdAt age is only a pre-filter — the authoritative check is
   //    whether BullMQ still owns the job. A retried book keeps its original
   //    createdAt, so without the liveness check the sweep used to fail

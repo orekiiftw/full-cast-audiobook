@@ -42,7 +42,7 @@ export { restitchChapterInBackground } from "./stitch";
 export { runPipelineSweep } from "./sweep";
 export { resumePendingWork } from "./recovery";
 export { deleteBook, retryFailedBook } from "./lifecycle";
-export { ensureLookahead, prefetchNextChapter, type LookaheadAnchor } from "./lookahead";
+export { ensureLookahead, ensureChapterLookahead, prefetchNextChapter, type LookaheadAnchor } from "./lookahead";
 
 /**
  * Connect Redis, recover pending work, then start workers and the sweep.

@@ -276,8 +276,10 @@ export async function runIngestionJob(job: Job<IngestionJobData>): Promise<void>
     });
 
     // Prime only the opening lookahead window (the first LOOKAHEAD_SEGMENTS
-    // lines). Playback position syncs re-center and top up the window from
-    // here on; the DB rows above remain the system of record.
+    // lines) for fast first-audio. The rest of the book stays "pending" until
+    // the listener starts a chapter — ensureChapterLookahead then voices the
+    // current chapter fully plus the next, capping TTS spend at two chapters
+    // ahead instead of transcribing the whole book.
     await ensureLookahead(bookId);
 
     // A book whose chapters ALL produced zero segments has no segment or

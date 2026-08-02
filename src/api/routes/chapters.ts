@@ -1,7 +1,7 @@
 import { asc, eq } from "drizzle-orm";
 import { db } from "../../db";
 import { segments } from "../../schema";
-import { ensureLookahead, prefetchNextChapter } from "../../orchestrator";
+import { ensureChapterLookahead, prefetchNextChapter } from "../../orchestrator";
 import { json } from "../response";
 import { requireUuid } from "../../lib/validators";
 import { AuthUser } from "../../auth";
@@ -32,15 +32,10 @@ export async function registerChapterRoutes(req: Request, path: string, user: Au
     // Prefetch next chapter in the background (don't block the response)
     prefetchNextChapter(chapter.bookId, chapter.chapterIndex).catch(console.error);
 
-    // Top up the just-in-time voicing window at the line the player is
-    // waiting on (?at=<segmentIndex>, 1-based). This is what unblocks a
-    // buffering player: its poll re-centers the window on itself.
-    const atParam = new URL(req.url).searchParams.get("at");
-    const at = atParam === null ? NaN : Number(atParam);
-    ensureLookahead(chapter.bookId, {
-      chapterIndex: chapter.chapterIndex,
-      segmentIndex: Number.isInteger(at) && at >= 1 ? at : 1,
-    }).catch(console.error);
+    // Transcribe this chapter fully + the next chapter so the buffering
+    // player's lines voice without interruption and the next chapter is
+    // ready when the listener reaches it. Idempotent — repeated polls no-op.
+    ensureChapterLookahead(chapter.bookId, chapter.chapterIndex).catch(console.error);
 
     return json({
       chapter,

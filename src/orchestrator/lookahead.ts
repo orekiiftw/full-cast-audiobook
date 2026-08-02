@@ -9,7 +9,7 @@ import { chapters, segments } from "../schema";
 import { EPUB_LIMITS, PIPELINE } from "../lib/constants";
 import { enqueueSegmentJobs, segmentJobId, segmentQueue, type SegmentJobData } from "../queue";
 
-/** Per book+anchor-chapter throttle — playback syncs arrive every few seconds
+/** Per book+anchor throttle — playback syncs arrive every few seconds
  *  and buffering players poll the segments endpoint, but the window only
  *  advances as segments are voiced, so repeated evaluations within a couple
  *  of seconds are pure churn. Keyed by anchor chapter so a cross-chapter seek
@@ -23,28 +23,20 @@ export interface LookaheadAnchor {
 }
 
 /**
- * Just-in-time scheduling: promote the first PIPELINE.LOOKAHEAD_SEGMENTS
+ * Opening-window scheduling: promote the first PIPELINE.LOOKAHEAD_SEGMENTS
  * unvoiced segments at/after the anchor from "pending" to "queued" and give
- * each a BullMQ job. Everything further out stays "pending" — no job, no
- * TTS spend — until the window advances onto it.
- *
- * Drivers: ingestion (anchor = book start), segment completion (top-up so
- * the opening window cannot drain and freeze the book), PUT /api/playback
- * (listener position), GET /api/chapters/:id/segments?at= (buffering player),
- * and the maintenance sweep (drained in_progress books). Idempotent:
- * promotion is an atomic pending→queued update and BullMQ dedupes on the
- * segment-id jobId, so overlapping calls can never double-schedule.
+ * each a BullMQ job. Used at ingestion to prime fast first-audio; everything
+ * further out stays "pending" until the listener starts a chapter (see
+ * ensureChapterLookahead). Idempotent: promotion is an atomic pending→queued
+ * update and BullMQ dedupes on the segment-id jobId.
  */
 export async function ensureLookahead(
   bookId: string,
   anchor: LookaheadAnchor = { chapterIndex: 1, segmentIndex: 1 },
-  opts: { /** Skip the HTTP-poll throttle (segment completion / sweep). */ force?: boolean } = {}
+  opts: { /** Skip the HTTP-poll throttle. */ force?: boolean } = {}
 ): Promise<void> {
   const throttleKey = `${bookId}:${anchor.chapterIndex}`;
   const now = Date.now();
-  // Playback/segment polls arrive every 1–8s; coalescing them is pure win.
-  // Completion-driven top-ups must not share that throttle or a burst of
-  // finished segments leaves the window half-empty until the next poll.
   if (!opts.force && now - (lookaheadThrottle.get(throttleKey) ?? 0) < LOOKAHEAD_THROTTLE_MS) {
     return;
   }
@@ -79,9 +71,6 @@ export async function ensureLookahead(
   const pendingIds = windowRows.filter((r) => r.status === "pending").map((r) => r.segmentId);
   if (pendingIds.length === 0) return;
 
-  // Atomic claim of the scheduling decision: concurrent ensureLookahead calls
-  // (playback sync + buffering poll) select the same pending rows, but only
-  // rows this call actually flips get jobs enqueued by it.
   const promoted = await db
     .update(segments)
     .set({ status: "queued" })
@@ -89,6 +78,78 @@ export async function ensureLookahead(
     .returning({ id: segments.id });
   if (promoted.length === 0) return;
 
+  await enqueueFromWindow(windowRows, promoted, bookId);
+}
+
+/**
+ * Chapter-scoped scheduling: promote EVERY pending segment in the current
+ * chapter and the next chapter from "pending" to "queued". This is the
+ * listener-driven trigger — called when the user starts (or polls while)
+ * playing chapter N — so the whole chapter N voices without interruption and
+ * chapter N+1 is fully voiced by the time the listener reaches it. Nothing
+ * beyond N+1 is ever scheduled until the listener advances, capping TTS spend
+ * at two chapters ahead instead of the whole book. Idempotent.
+ */
+export async function ensureChapterLookahead(
+  bookId: string,
+  chapterIndex: number,
+  opts: { /** Skip the HTTP-poll throttle. */ force?: boolean } = {}
+): Promise<void> {
+  const throttleKey = `chapter:${bookId}:${chapterIndex}`;
+  const now = Date.now();
+  if (!opts.force && now - (lookaheadThrottle.get(throttleKey) ?? 0) < LOOKAHEAD_THROTTLE_MS) {
+    return;
+  }
+  if (!opts.force) lookaheadThrottle.set(throttleKey, now);
+  if (lookaheadThrottle.size > 5000) lookaheadThrottle.clear();
+
+  // Promote all pending segments in chapterIndex and chapterIndex+1 (if it
+  // exists). Ordered by chapter then segment so the current chapter's jobs
+  // run first (BullMQ priority = chapterIndex, lower runs first).
+  const windowRows = await db
+    .select({
+      segmentId: segments.id,
+      chapterId: chapters.id,
+      chapterIndex: chapters.chapterIndex,
+      segmentIndex: segments.segmentIndex,
+      status: segments.status,
+    })
+    .from(segments)
+    .innerJoin(chapters, eq(segments.chapterId, chapters.id))
+    .where(
+      and(
+        eq(chapters.bookId, bookId),
+        inArray(chapters.chapterIndex, [chapterIndex, chapterIndex + 1]),
+        eq(segments.status, "pending")
+      )
+    )
+    .orderBy(asc(chapters.chapterIndex), asc(segments.segmentIndex));
+
+  if (windowRows.length === 0) return;
+
+  const pendingIds = windowRows.map((r) => r.segmentId);
+  const promoted = await db
+    .update(segments)
+    .set({ status: "queued" })
+    .where(and(inArray(segments.id, pendingIds), eq(segments.status, "pending")))
+    .returning({ id: segments.id });
+  if (promoted.length === 0) return;
+
+  await enqueueFromWindow(windowRows, promoted, bookId);
+}
+
+/**
+ * Shared enqueue + rollback for the two promotion paths. `windowRows` is the
+ * candidate set this call selected; `promoted` is the subset the atomic
+ * pending→queued update actually flipped (concurrent calls may have claimed
+ * some). Only promoted rows get a job; if enqueue fails, roll them back to
+ * "pending" so the next call re-drives them instead of stranding them queued.
+ */
+async function enqueueFromWindow(
+  windowRows: Array<{ segmentId: string; chapterId: string; chapterIndex: number; segmentIndex: number; status: string }>,
+  promoted: Array<{ id: string }>,
+  bookId: string
+): Promise<void> {
   const promotedIds = new Set(promoted.map((r) => r.id));
   const tasks: SegmentJobData[] = windowRows
     .filter((r) => promotedIds.has(r.segmentId))
@@ -102,10 +163,6 @@ export async function ensureLookahead(
   try {
     await enqueueSegmentJobs(tasks);
   } catch (err) {
-    // The promotion committed but the enqueue failed — roll still-queued rows
-    // back to "pending" so the next ensureLookahead re-drives them, instead of
-    // stranding them "queued" with no job until the sweep's watermark refill.
-    // Rows a worker already claimed (processing) are untouched.
     await db
       .update(segments)
       .set({ status: "pending" })
