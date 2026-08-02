@@ -60,9 +60,16 @@ export default function Library({ onSelectBook, bootBooks }: LibraryProps) {
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  /** Monotonic counter — overlapping fetches (5s poll, visibilitychange,
+   *  post-add) settle in LAST-REQUESTED order instead of last-resolved, so a
+   *  slow stale response can't resurrect deleted books or revert statuses. */
+  const fetchSeqRef = useRef(0);
+
   const fetchBooks = useCallback(async () => {
+    const seq = ++fetchSeqRef.current;
     try {
       const res = await apiFetch("/api/books");
+      if (seq !== fetchSeqRef.current) return; // superseded by a newer fetch
       if (res.ok) {
         setBooks((await res.json()) as Book[]);
         setLoadError(false);
@@ -71,10 +78,11 @@ export default function Library({ onSelectBook, bootBooks }: LibraryProps) {
         setLoadError(true);
       }
     } catch (err) {
+      if (seq !== fetchSeqRef.current) return;
       console.error(err);
       setLoadError(true);
     } finally {
-      setLoading(false);
+      if (seq === fetchSeqRef.current) setLoading(false);
     }
   }, []);
 

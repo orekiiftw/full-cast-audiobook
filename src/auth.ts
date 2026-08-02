@@ -65,7 +65,11 @@ function cookieSecure(req: Request): boolean {
   // browser silently refuses to store over HTTP — login appears broken.
   if (process.env.INSECURE_HTTP === "true") return false;
   if (process.env.NODE_ENV === "production") return true;
-  const forwarded = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  // Only trust X-Forwarded-Proto when proxy trust is explicitly enabled —
+  // a directly-exposed server must not let a client spoof HTTPS-ness.
+  const forwarded = process.env.TRUST_PROXY === "true"
+    ? req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim()
+    : undefined;
   return new URL(req.url).protocol === "https:" || forwarded === "https";
 }
 
@@ -97,13 +101,15 @@ export function parsedClientIp(req: Request, connectionIp: string): string {
     .filter((h) => h.length > 0);
   if (hops.length === 0) return connectionIp;
   // TRUST_PROXY_HOPS = number of trusted proxies in front of this server
-  // (default 1). The real client is `hops.length - trustHops` from the left;
-  // if there are fewer hops than trusted proxies, fall back to the first hop
-  // (an unterminated chain is still better than trusting the last one blindly).
+  // (default 1). The real client is `hops.length - trustHops` from the left.
   const trustHops = Number(process.env.TRUST_PROXY_HOPS);
   const n = Number.isFinite(trustHops) && Number.isInteger(trustHops) && trustHops > 0 ? trustHops : 1;
-  const idx = Math.max(0, hops.length - n);
-  return hops[idx] || connectionIp;
+  // A chain shorter than the number of trusted proxies means the client could
+  // have written every hop present — trusting ANY of them (including the old
+  // hops[0] fallback) lets a client spoof the IP the login throttle keys on.
+  // Distrust the header entirely and use the direct connection IP.
+  if (hops.length < n) return connectionIp;
+  return hops[hops.length - n] || connectionIp;
 }
 
 export async function createSession(userId: string): Promise<{ token: string; expiresAt: Date }> {
@@ -127,12 +133,17 @@ export async function createSession(userId: string): Promise<{ token: string; ex
  * Best-effort revocation: a failure to delete old sessions must not block login.
  */
 export async function createSessionRotating(userId: string): Promise<{ token: string; expiresAt: Date }> {
-  // Revoke existing sessions first (so a concurrent request holding an old
-  // token is invalidated), then issue the new one.
-  db.delete(sessions)
-    .where(eq(sessions.userId, userId))
-    .catch((err) => console.warn("Session rotation revoke failed:", err));
-  return createSession(userId);
+  // Revoke existing sessions and issue the new one atomically in a single
+  // transaction: a failed delete must roll back the insert (never leave a
+  // stolen cookie valid), and concurrent logins serialize on the row locks
+  // instead of both deleting then both inserting.
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+  await db.transaction(async (tx) => {
+    await tx.delete(sessions).where(eq(sessions.userId, userId));
+    await tx.insert(sessions).values({ userId, tokenHash: hashSessionToken(token), expiresAt });
+  });
+  return { token, expiresAt };
 }
 
 export async function authenticateRequest(req: Request): Promise<AuthUser | null> {

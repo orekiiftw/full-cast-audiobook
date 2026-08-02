@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../../db";
 import { castMembers } from "../../schema";
 import { getTTSProvider } from "../../ttsService";
@@ -62,15 +62,14 @@ export async function registerCastRoutes(req: Request, path: string, user: AuthU
     // Persist for next time. The generation guard in the WHERE clause means
     // an invalidation that raced our synthesis wins — we only write if the
     // row hasn't been bumped since we read it.
-    const setGen = castMember.previewGen + 1;
     await db
       .update(castMembers)
       .set({
         previewAudio: audioBuffer.toString("base64"),
         previewVoiceKey: expectedKey,
-        previewGen: setGen,
+        previewGen: castMember.previewGen + 1,
       })
-      .where(eq(castMembers.id, castId));
+      .where(and(eq(castMembers.id, castId), eq(castMembers.previewGen, castMember.previewGen)));
 
     return binary(audioBuffer, "audio/wav");
   } catch {

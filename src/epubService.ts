@@ -1,6 +1,7 @@
 import AdmZip from "adm-zip";
 import { parse } from "node-html-parser";
 import * as path from "path";
+import { inflateRawSync } from "node:zlib";
 import { EPUB_LIMITS, PIPELINE } from "./lib/constants";
 
 export interface BookBlock {
@@ -20,9 +21,32 @@ export interface ParsedBook {
   chapters: ParsedChapter[];
 }
 
-/** File-path hints for front/back matter (covers, title pages, TOC, intros…). */
-const FRONT_BACK_PATH_RE =
-  /copyright|^copy\d|toc|n?cx|table[_-]?of[_-]?contents|contents|nav\.x?html|half-?title|title\d|cover|index|biblio|references|about|author|ack|advert|synops|summary|preface|foreword|dedicat|epigraph|praise|front-?matter|imprint|glossar|appendix|endnotes?|footnotes?|chronolog|illustrat|map\d|intro|desc|blurb|teaser/i;
+/** Filename-stem tokens that mark front/back matter (matched exactly). */
+const FRONT_BACK_MATTER_TOKENS = new Set([
+  "copyright", "toc", "ncx", "cx", "contents", "nav", "cover", "index",
+  "biblio", "references", "about", "author", "ack", "acks", "advert",
+  "adverts", "summary", "synopsis", "preface", "foreword", "epigraph",
+  "praise", "imprint", "glossary", "appendix", "endnotes", "footnotes",
+  "chronology", "intro", "desc", "blurb", "teaser", "half", "title",
+  "excerpt", "sample",
+]);
+
+/** Stem prefixes for longer matter filenames (acknowledgments, dedication…). */
+const FRONT_BACK_STEM_RE =
+  /^(?:copy\d+|title\d+|map\d+|half[-_]?title|front[-_]?matter|frontmatter|table[-_]?of[-_]?contents|acknowledg|dedicat|synops|glossar|chronolog|illustrat|appendices|bibliograph)/;
+
+/**
+ * Path-based front/back-matter detector. Matches the file's basename stem
+ * against exact tokens (or a few prefix families) instead of substring
+ * matching on the whole path: the old /ack|desc|intro|title\d/ unanchored
+ * regex silently dropped real chapter files like jack.xhtml, descent.xhtml,
+ * or attack_ch2.xhtml.
+ */
+function isFrontBackMatterPath(filePath: string): boolean {
+  const stem = (filePath.split("/").pop() ?? filePath).replace(/\.[a-z0-9]+$/i, "").toLowerCase();
+  if (FRONT_BACK_STEM_RE.test(stem)) return true;
+  return stem.split(/[^a-z0-9]+/).some((part) => FRONT_BACK_MATTER_TOKENS.has(part));
+}
 
 /**
  * Heading-text hints for front matter — pages like "Synopsis", "Preface",
@@ -45,6 +69,28 @@ const BACK_MATTER_SECTION_RE =
   /^\s*(contexts|criticism|critical (essays|contexts|heritage)|appendix|appendices|bibliography|selected bibliography|works cited|endnotes|notes|glossary|index|about the author|about the publisher|afterword|chronology|a chronology)\b/i;
 
 /**
+ * Inflates a zip entry with a hard output cap. Deflate (method 8) is the only
+ * scheme that can amplify a small declared size into a huge allocation, so it
+ * is inflated with zlib's maxOutputLength — a forged header (declared small,
+ * inflates gigabytes) throws inside zlib BEFORE the output buffer is fully
+ * allocated, instead of materializing it and OOMing the process. Stored (and
+ * other rare) methods cannot amplify beyond the archive's own bytes.
+ */
+function inflateEntryCapped(entry: AdmZip.IZipEntry, maxBytes: number, what: string): Buffer {
+  if (entry.header.method === 8) {
+    try {
+      return inflateRawSync(entry.getCompressedData(), { maxOutputLength: maxBytes + 1 });
+    } catch (err) {
+      if (err instanceof RangeError) {
+        throw new Error(`EPUB ${what} is too large (over ${Math.round(maxBytes / (1024 * 1024))}MB uncompressed).`);
+      }
+      throw new Error(`EPUB ${what} could not be decompressed (${err instanceof Error ? err.message : String(err)}).`);
+    }
+  }
+  return entry.getData();
+}
+
+/**
  * Reads a zip entry as text with a hard cap on its uncompressed size.
  * The declared header size is checked before inflating, and the actual
  * inflated length is checked after (headers can lie).
@@ -57,7 +103,7 @@ function readEntryTextCapped(
   if (entry.header.size > maxBytes) {
     throw new Error(`EPUB ${what} is too large (over ${Math.round(maxBytes / (1024 * 1024))}MB uncompressed).`);
   }
-  const data = entry.getData();
+  const data = inflateEntryCapped(entry, maxBytes, what);
   if (data.length > maxBytes) {
     throw new Error(`EPUB ${what} is too large (over ${Math.round(maxBytes / (1024 * 1024))}MB uncompressed).`);
   }
@@ -87,12 +133,16 @@ export function parseEpub(buffer: Buffer): ParsedBook {
   }
 
   const containerContent = readEntryTextCapped(containerEntry, EPUB_LIMITS.MAX_CONTAINER_BYTES, "container.xml");
-  const rootfileMatch = containerContent.match(/rootfile\s+full-path="([^"]+)"/);
-  if (!rootfileMatch) {
+  // Attribute order and quoting vary across valid EPUBs — match the tag, then
+  // find the full-path attribute inside it, rather than demanding it be the
+  // first attribute with double quotes.
+  const rootfileTag = containerContent.match(/<rootfile\b[^>]*>/i)?.[0] ?? "";
+  const rootfilePath = rootfileTag.match(/full-path\s*=\s*["']([^"']+)["']/i)?.[1];
+  if (!rootfilePath) {
     throw new Error("Invalid container.xml: Cannot find rootfile path");
   }
 
-  const opfPath = rootfileMatch[1];
+  const opfPath = rootfilePath.replace(/\\/g, "/").split("#")[0].split("?")[0];
   const opfEntry = zip.getEntry(opfPath);
   if (!opfEntry) {
     throw new Error(`Missing OPF file at path: ${opfPath}`);
@@ -116,8 +166,11 @@ export function parseEpub(buffer: Buffer): ParsedBook {
     const id = item.getAttribute("id");
     const href = item.getAttribute("href");
     if (id && href) {
-      // Clean and resolve path relative to OPF folder
-      const resolvedPath = path.posix.join(opfDir, safeDecodeHref(href));
+      // Clean and resolve path relative to OPF folder. Strip #fragment and
+      // ?query (real EPUBs ship these; the zip entry name never carries them)
+      // and normalize Windows-style backslashes.
+      const cleanedHref = safeDecodeHref(href).split("#")[0].split("?")[0].replace(/\\/g, "/");
+      const resolvedPath = path.posix.join(opfDir, cleanedHref);
       manifestMap.set(id, resolvedPath);
     }
   }
@@ -127,11 +180,13 @@ export function parseEpub(buffer: Buffer): ParsedBook {
   const readingOrder: string[] = [];
   for (const itemref of spineItems) {
     const idref = itemref.getAttribute("idref");
-    if (idref) {
-      const filePath = manifestMap.get(idref);
-      if (filePath) {
-        readingOrder.push(filePath);
-      }
+    if (!idref) continue;
+    // linear="no" marks out-of-sequence content (footnote blocks, back-matter
+    // trees, popups) — voicing it inline would read the book out of order.
+    if ((itemref.getAttribute("linear") ?? "yes").toLowerCase() === "no") continue;
+    const filePath = manifestMap.get(idref);
+    if (filePath) {
+      readingOrder.push(filePath);
     }
   }
 
@@ -144,9 +199,11 @@ export function parseEpub(buffer: Buffer): ParsedBook {
   let chapterIndex = 1;
   let inBackMatter = false;
   let totalTextBytes = 0;
+  let totalPageWords = 0;
 
-  for (const filePath of readingOrder) {
-    if (FRONT_BACK_PATH_RE.test(filePath)) {
+  for (let spineIdx = 0; spineIdx < readingOrder.length; spineIdx++) {
+    const filePath = readingOrder[spineIdx];
+    if (isFrontBackMatterPath(filePath)) {
       continue;
     }
 
@@ -183,9 +240,15 @@ export function parseEpub(buffer: Buffer): ParsedBook {
 
     // Section dividers like "CONTEXTS" / "CRITICISM" mark the end of the
     // main text in critical editions & anthologies — everything after them
-    // is apparatus (essays, notes, bibliographies), not the book.
+    // is apparatus (essays, notes, bibliographies), not the book. Only latch
+    // this near the end of the spine and after real content: a mid-book part
+    // literally titled "Notes"/"Afterword" (or a false-positive heading) used
+    // to silently truncate the rest of the book.
     if (rawHeading && BACK_MATTER_SECTION_RE.test(rawHeading)) {
-      inBackMatter = true;
+      const spineFraction = (spineIdx + 1) / readingOrder.length;
+      if (spineFraction >= 0.6 && totalPageWords >= PIPELINE.MIN_BOOK_WORDS) {
+        inBackMatter = true;
+      }
     }
     if (inBackMatter) continue;
 
@@ -251,6 +314,7 @@ export function parseEpub(buffer: Buffer): ParsedBook {
     if (blocks.length > 0) {
       // Verify this page is not just metadata (TOC, title) by checking if it has substantial content
       const pageWords = blocks.reduce((acc, b) => acc + b.text.split(/\s+/).length, 0);
+      totalPageWords += pageWords;
 
       // The first accepted page becomes "Chapter 1", so it must be the actual
       // start of the main story — never a description, dedication, "praise"

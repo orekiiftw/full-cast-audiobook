@@ -1,4 +1,5 @@
 import { ensureWavBuffer } from "./audioUtils";
+import { readStreamWithCap } from "./lib/readStream";
 import { PIPELINE, TTS, DEFAULT_TS_MODEL, MIMO_TS_BASE_URL, VOICEDESIGN_TS_MODEL } from "./lib/constants";
 
 const MIMO_TTS_MODEL = process.env.MIMO_TS_MODEL || DEFAULT_TS_MODEL;
@@ -6,6 +7,9 @@ const MIMO_BASE_URL = (process.env.MIMO_TS_BASE_URL || MIMO_TS_BASE_URL).replace
 
 /** Per-request timeout for a single MiMo synthesis call. */
 const REQUEST_TIMEOUT_MS = TTS.REQUEST_TIMEOUT_MS;
+
+/** Cap on a single TTS response body (audio arrives as base64 JSON — huge). */
+const TTS_RESPONSE_CAP = 64 * 1024 * 1024;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -32,6 +36,14 @@ class MiMoApiError extends Error {
   ) {
     super(message);
     this.name = "MiMoApiError";
+  }
+}
+
+/** Permanent configuration error (e.g. missing MIMO_API_KEY) — never retry. */
+export class TtsConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TtsConfigError";
   }
 }
 
@@ -85,7 +97,10 @@ function compiledDict(dict: Record<string, string>): Array<{ regex: RegExp; hint
   let compiled = compiledDictCache.get(dict);
   if (!compiled) {
     compiled = Object.entries(dict).map(([term, hint]) => ({
-      regex: new RegExp(`\\b${term.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&")}\\b`, "gi"),
+      // Word-boundary lookarounds instead of \b: \b fails for terms edged with
+      // punctuation — "Mr." compiles to \bMr\.\b, and no boundary exists after
+      // the "." in "Mr. Darcy" — so the substitution silently never fired.
+      regex: new RegExp(`(?<![\\w])${term.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&")}(?![\\w])`, "gi"),
       // Escape `$` in the replacement so JS doesn't interpret special
       // patterns like $&, $`, $' that would duplicate surrounding text.
       hint: hint.replace(/\$/g, "$$$$"),
@@ -95,7 +110,9 @@ function compiledDict(dict: Record<string, string>): Array<{ regex: RegExp; hint
   return compiled;
 }
 
-function isRetryableError(error: unknown): boolean {
+/** Permanent configuration errors and deliberate 4xx responses are NOT retried. */
+export function isRetryableError(error: unknown): boolean {
+  if (error instanceof TtsConfigError) return false;
   if (error instanceof MiMoApiError) {
     return RETRYABLE_STATUSES.has(error.status) || error.status >= 500;
   }
@@ -127,7 +144,7 @@ export class MiMoTSProvider implements TTSProvider {
   private getApiKey(): string {
     const apiKey = process.env.MIMO_API_KEY;
     if (!apiKey) {
-      throw new Error("MIMO_API_KEY environment variable is not set.");
+      throw new TtsConfigError("MIMO_API_KEY environment variable is not set.");
     }
     return apiKey;
   }
@@ -184,7 +201,7 @@ export class MiMoTSProvider implements TTSProvider {
       throw error;
     }
 
-    const json = (await res.json().catch(() => null)) as MiMoChatResponse | null;
+    const json = (await readResponseJson(res)) as MiMoChatResponse | null;
     if (!res.ok) {
       const apiMsg = json?.error?.message;
       throw new MiMoApiError(
@@ -232,8 +249,10 @@ export class MiMoTSProvider implements TTSProvider {
       }
 
       try {
+        // Never log stylePrompt verbatim: it contains book-derived annotation
+        // output and user regen instructions (sensitive content + log volume).
         console.log(
-          `🎙️ MiMo TTS (Attempt ${attempt}/${maxAttempts}) for voice "${voiceName}" with prompt: "${stylePrompt}"`
+          `🎙️ MiMo TTS (Attempt ${attempt}/${maxAttempts}) for voice "${voiceName}" (${processedText.length} chars)`
         );
 
         return await this.requestSpeech(voiceName, stylePrompt, processedText);
@@ -275,6 +294,20 @@ export class MiMoTSProvider implements TTSProvider {
 }
 
 let sharedProvider: MiMoTSProvider | null = null;
+
+/** Reads a MiMo response body as JSON with a hard size cap (unbounded
+ *  res.json() could buffer a runaway payload wholesale). */
+async function readResponseJson(res: Response): Promise<MiMoChatResponse | null> {
+  if (!res.body) return null;
+  try {
+    const buffer = await readStreamWithCap(res.body, TTS_RESPONSE_CAP, () =>
+      new Error("MiMo TTS response exceeded the 64MB size limit.")
+    );
+    return JSON.parse(buffer.toString("utf-8")) as MiMoChatResponse;
+  } catch {
+    return null;
+  }
+}
 
 export function getTTSProvider(): MiMoTSProvider {
   if (!sharedProvider) sharedProvider = new MiMoTSProvider();

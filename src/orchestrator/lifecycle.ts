@@ -6,8 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import { books, chapters, castMembers, pronunciationDict, segments } from "../schema";
 import { deleteFile } from "../r2";
-import { invalidateBookVoiceContext } from "../lib/bookCache";
-import { emitProgressEvent, enqueueIngestion, removeBookJobs } from "../queue";
+import { emitProgressEvent, enqueueIngestion, invalidateBookVoiceContextClusterwide, removeBookJobs } from "../queue";
 
 /**
  * Delete a book, its queued jobs, and its stored files.
@@ -44,7 +43,7 @@ export async function deleteBook(bookId: string): Promise<boolean> {
   ].filter((k): k is string => !!k);
 
   await db.delete(books).where(eq(books.id, bookId));
-  invalidateBookVoiceContext(bookId);
+  invalidateBookVoiceContextClusterwide(bookId);
 
   // Purge stored audio/EPUB best-effort so storage doesn't leak orphaned files.
   // Bounded batches: a large book can have ~100k segment files, and firing
@@ -99,7 +98,7 @@ export async function retryFailedBook(bookId: string): Promise<{ ok: true } | { 
   await db.delete(chapters).where(eq(chapters.bookId, bookId));
   await db.delete(castMembers).where(eq(castMembers.bookId, bookId));
   await db.delete(pronunciationDict).where(eq(pronunciationDict.bookId, bookId));
-  invalidateBookVoiceContext(bookId);
+  invalidateBookVoiceContextClusterwide(bookId);
 
   try {
     // The ingestion worker loads the EPUB via books.epubR2Key — no buffer in

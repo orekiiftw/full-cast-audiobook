@@ -93,7 +93,7 @@ Ensure you configure:
 
 ### Durable pipeline & multiple instances
 
-Postgres owns pipeline **state** (segment/chapter/book status); Redis owns **scheduling** (ordering, retries, distribution). Crashed work is recovered in layers: BullMQ stalled-job detection (~30s), a maintenance sweep every 5 minutes (orphaned rows, queue refill after Redis data loss, due stitches, stuck ingestions), and boot-time re-enqueue of all queued segments. To run multiple instances, point every instance at the same Postgres and Redis and start them normally — job dedupe (deterministic job IDs) and the atomic DB segment claim prevent double work; progress events fan out to all instances over Redis pub/sub. Note the login rate limit and SSE connection caps remain per-instance.
+Postgres owns pipeline **state** (segment/chapter/book status); Redis owns **scheduling** (ordering, retries, distribution). Crashed work is recovered in layers: BullMQ stalled-job detection (~30s), a maintenance sweep every 5 minutes (orphaned rows, queue refill after Redis data loss, due stitches, stuck ingestions), and boot-time re-enqueue of all queued segments. To run multiple instances, point every instance at the same Postgres and Redis and start them normally — job dedupe (deterministic job IDs) and the atomic DB segment claim prevent double work; progress events fan out to all instances over Redis pub/sub. Note the login rate limit, book-search throttle, and SSE connection caps remain per-instance.
 
 ### 2. Install Node Dependencies
 Run the installation command in your terminal:

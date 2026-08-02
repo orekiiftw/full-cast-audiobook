@@ -12,9 +12,6 @@ dist/
 # Local storage fallback for R2
 .storage/
 
-# Drizzle / DB artifacts
-drizzle/
-
 # Logs & OS
 *.log
 .DS_Store

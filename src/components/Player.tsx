@@ -6,7 +6,6 @@ import { ProgressBar } from "./ui/ProgressBar";
 import { useToast } from "./ui/Toast";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
 import { useSSE } from "../hooks/useSSE";
-import { useSleepTimer } from "../hooks/useSleepTimer";
 import { apiFetch } from "../lib/api";
 import { formatDurationWithHours, segmentAudioSrc } from "../lib/format";
 import { isPendingStatus, isPlayableSegment } from "../lib/segmentStatus";
@@ -19,6 +18,13 @@ interface PlayerProps {
   chapter: Chapter;
   isPlaying: boolean;
   setIsPlaying: (playing: boolean) => void;
+  /** Sleep-timer state lives in App so it survives chapter changes: Player is
+   *  remounted (via key) on every chapter switch, which used to reset the
+   *  timer mid-book. */
+  sleepPreset: number | null;
+  setSleepPreset: (preset: number | null) => void;
+  sleepTimeLeft: number | null;
+  setSleepTimeLeft: (left: number | null) => void;
   playbackSpeed: number;
   setPlaybackSpeed: (speed: number) => void;
   /** Shared position sink: updated on every timeupdate without re-rendering App. */
@@ -59,6 +65,10 @@ export default function Player({
   chapter,
   isPlaying,
   setIsPlaying,
+  sleepPreset,
+  setSleepPreset,
+  sleepTimeLeft,
+  setSleepTimeLeft,
   playbackSpeed,
   setPlaybackSpeed,
   positionRef,
@@ -87,8 +97,8 @@ export default function Player({
     [positionRef]
   );
 
-  // Sleep timer: preset choice + live countdown
-  const { sleepPreset, setSleepPreset, sleepTimeLeft, setSleepTimeLeft } = useSleepTimer(setIsPlaying);
+  // Sleep timer state is hoisted to App (Player remounts on chapter change).
+  // The sleep UI reads sleepPreset/sleepTimeLeft from props below.
 
   // Regeneration modal state
   const [showRegenModal, setShowRegenModal] = useState(false);
@@ -260,8 +270,8 @@ export default function Player({
       // change — deliberately NOT here, so a speed toggle doesn't change this
       // callback's identity and re-fire the whole segment-load effect.
 
-      if (autoplay || !isSame) {
-        void loadAndPlay(url, seekSec, force || !isSame).then((ok) => {
+      if (!isSame) {
+        void loadAndPlay(url, seekSec, force, autoplay).then((ok) => {
           if (!ok && autoplay && isPlayingRef.current && isActuallyPaused()) {
             // Stay flagged playing only if element actually started; otherwise show Play
             // (onPlayBlocked may already have flipped state)
@@ -461,7 +471,12 @@ export default function Player({
     []
   );
 
-  useSSE(`/api/books/${book.id}/events`, { onEvent: handlePipelineEvent });
+  useSSE(`/api/books/${book.id}/events`, {
+    onEvent: handlePipelineEvent,
+    // Events emitted during the reconnect gap were missed — resync from the
+    // DB instead of staying stale until the next unrelated event arrives.
+    onReconnect: runSseRefresh,
+  });
 
   // Load and play the active segment — only reloads when the active identity/URL changes
   useEffect(() => {
@@ -596,7 +611,16 @@ export default function Player({
   // Keyboard shortcuts: Space = play/pause, Arrows = ±10s
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      const target = e.target as HTMLElement | null;
+      // Never hijack keys typed into form controls or the regen modal: Space
+      // on a focused <select> used to both block the dropdown and toggle
+      // playback, and Space on the modal's "Perform line" button both
+      // submitted AND toggled. Excluding buttons also avoids the double
+      // activation from Space's native click.
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+      if (target instanceof HTMLSelectElement || target instanceof HTMLButtonElement) return;
+      if (target && target.isContentEditable) return;
+      if (showRegenModal) return;
       // Holding a key fires repeated keydowns — ignore auto-repeat so a held
       // arrow doesn't skip minutes of audio in a second.
       if (e.repeat) return;
@@ -613,7 +637,7 @@ export default function Player({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [seekRelative, togglePlayPause]);
+  }, [seekRelative, togglePlayPause, showRegenModal]);
 
   // Keep the active segment in view while reading. Intentionally NOT keyed on
   // segmentsList: refresh polls give it a new identity every ~1.2s, which

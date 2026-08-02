@@ -29,9 +29,11 @@ export class ProviderRegistry {
     const provider = this.get(providerName);
     const started = performance.now();
     const results = rankBooks(await provider.search({ ...query, limit: Math.min(query.limit ?? maxResults, maxResults) }), query).slice(0, query.limit ?? maxResults);
-    console.info(JSON.stringify({ event: "provider_search", provider: providerName, query, normalizedQuery, latencyMs: Math.round(performance.now() - started), results: results.length, cache: "miss" }));
+    // Log the normalized query only (not the raw user-supplied text) to limit
+    // PII/log-injection exposure while keeping provider-latency observability.
+    console.info(JSON.stringify({ event: "provider_search", provider: providerName, normalizedQuery, latencyMs: Math.round(performance.now() - started), results: results.length, cache: "miss" }));
     const now = new Date();
-    await db.insert(bookSearchCache).values({ query: JSON.stringify(query), normalizedQuery, provider: providerName, responseJson: results, createdAt: now, expiresAt: new Date(now.getTime() + cacheTtlMs) }).onConflictDoUpdate({ target: [bookSearchCache.normalizedQuery, bookSearchCache.provider], set: { query: JSON.stringify(query), responseJson: results, createdAt: now, expiresAt: new Date(now.getTime() + cacheTtlMs) } });
+    await db.insert(bookSearchCache).values({ query: normalizedQuery, normalizedQuery, provider: providerName, responseJson: results, createdAt: now, expiresAt: new Date(now.getTime() + cacheTtlMs) }).onConflictDoUpdate({ target: [bookSearchCache.normalizedQuery, bookSearchCache.provider], set: { query: normalizedQuery, responseJson: results, createdAt: now, expiresAt: new Date(now.getTime() + cacheTtlMs) } });
     return { results, cache: "miss" };
   }
 

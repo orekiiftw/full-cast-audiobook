@@ -16,6 +16,35 @@ const MAX_PROVIDER_LENGTH = 64;
  */
 const MAX_PROVIDER_BOOK_ID_LENGTH = 4096;
 
+/**
+ * Per-user throttle for provider lookups. The search endpoint spends upstream
+ * provider quota, and the detail endpoint upserts a book_metadata row per
+ * unique (provider, id) — unthrottled, an authenticated user could flood
+ * unique IDs for unbounded table growth. Fixed-window, per instance (same
+ * documented model as the login rate limit).
+ */
+const SEARCH_WINDOW_MS = 15 * 60 * 1000;
+const SEARCH_MAX_REQUESTS = 60;
+const searchAttempts = new Map<string, { count: number; resetAt: number }>();
+let searchLastSweep = 0;
+
+function searchRateLimited(userId: string): boolean {
+  const now = Date.now();
+  if (now - searchLastSweep >= 60_000) {
+    searchLastSweep = now;
+    for (const [key, entry] of searchAttempts) {
+      if (entry.resetAt <= now) searchAttempts.delete(key);
+    }
+  }
+  const entry = searchAttempts.get(userId);
+  if (!entry || entry.resetAt <= now) {
+    searchAttempts.set(userId, { count: 1, resetAt: now + SEARCH_WINDOW_MS });
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > SEARCH_MAX_REQUESTS;
+}
+
 const string = (value: unknown, name: string) => boundedString(value, name, MAX_QUERY_LENGTH);
 function strings(value: unknown, name: string): string[] | undefined {
   if (value == null) return undefined;
@@ -23,8 +52,11 @@ function strings(value: unknown, name: string): string[] | undefined {
   return value.map((x) => x.trim()).filter(Boolean);
 }
 
-export async function registerBookSearchRoutes(req: Request, path: string, _user: AuthUser): Promise<Response | null> {
+export async function registerBookSearchRoutes(req: Request, path: string, user: AuthUser): Promise<Response | null> {
   if (path === SEARCH_PATH && req.method === "POST") {
+    if (searchRateLimited(user.id)) {
+      return json({ error: "Too many book searches. Try again later." }, 429);
+    }
     const body = await readJsonWithLimit<Record<string, unknown>>(req, 32 * 1024);
     const query: SearchQuery = { title: string(body.title, "title"), author: string(body.author, "author"), isbn: string(body.isbn, "isbn"), languages: strings(body.languages, "languages"), formats: strings(body.formats, "formats") as BookFormat[] | undefined, limit: typeof body.limit === "number" && Number.isInteger(body.limit) && body.limit > 0 && body.limit <= 100 ? body.limit : undefined };
     if (!query.title && !query.author && !query.isbn) throw new ValidationError("At least one of title, author, or isbn is required");
@@ -34,6 +66,9 @@ export async function registerBookSearchRoutes(req: Request, path: string, _user
   }
   const detail = path.match(DETAIL_RE);
   if (detail && req.method === "GET") {
+    if (searchRateLimited(user.id)) {
+      return json({ error: "Too many book lookups. Try again later." }, 429);
+    }
     const provider = decodeURIComponent(detail[1]);
     const providerBookId = decodeURIComponent(detail[2]);
     // Bound both segments: a pathologically long ID upserts a book_metadata

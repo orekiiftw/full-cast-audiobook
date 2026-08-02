@@ -78,7 +78,10 @@ export async function registerChapterRoutes(req: Request, path: string, user: Au
     return new Response(null, {
       status: 302,
       headers: {
-        Location: `/api/audio?key=${encodeURIComponent(chapter.audioR2Key)}`,
+        // v=duration busts the year-long immutable audio cache when a segment
+        // regeneration re-stitches the chapter in place (same R2 key), exactly
+        // like the per-segment audioUrl versioning above.
+        Location: `/api/audio?key=${encodeURIComponent(chapter.audioR2Key)}&v=${chapter.durationMs ?? 0}`,
       },
     });
   }

@@ -96,6 +96,8 @@ export const QUEUE = {
   QUEUED_REFILL_WATERMARK: 100,
   /** Redis pub/sub channel fanning pipeline progress events out to every instance. */
   EVENTS_CHANNEL: "narratea:pipeline-events",
+  /** Redis pub/sub channel broadcasting voice-context cache invalidations. */
+  VOICE_INVALIDATE_CHANNEL: "narratea:voice-context-invalidate",
 } as const;
 
 export const TEMP = {

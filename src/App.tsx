@@ -7,6 +7,7 @@ import { Button } from "./components/ui/Button";
 import { BrandLogo } from "./components/ui/BrandLogo";
 import { Icon } from "./components/ui/Icon";
 import { useToast } from "./components/ui/Toast";
+import { useSleepTimer } from "./hooks/useSleepTimer";
 import { AUTH_EXPIRED_EVENT, apiFetch, authUserFromResponse } from "./lib/api";
 import { PLAYBACK } from "./lib/constants";
 import { clearSessionHint, hasSessionHint, markSessionHint } from "./lib/sessionHint";
@@ -203,6 +204,11 @@ function AuthenticatedApp({ user, onLogout, bootBooks }: AuthenticatedAppProps) 
   const [resumePositionMs, setResumePositionMs] = useState(0);
   const [playSession, setPlaySession] = useState(0);
 
+  // Sleep timer lives here, not in Player: Player is remounted (via key) on
+  // every chapter change, which used to reset the timer mid-book — exactly the
+  // all-night-playback scenario it exists for.
+  const { sleepPreset, setSleepPreset, sleepTimeLeft, setSleepTimeLeft } = useSleepTimer(setIsPlaying, isPlaying);
+
   const positionRef = useRef(0);
   /**
    * Which book/chapter `positionRef` currently describes. Updated
@@ -211,6 +217,10 @@ function AuthenticatedApp({ user, onLogout, bootBooks }: AuthenticatedAppProps) 
    * the NEW chapter's 0-position into the OLD chapter's row on every switch.)
    */
   const playbackSessionRef = useRef<{ bookId: string; chapterId: string } | null>(null);
+  /** Monotonic counter so concurrent chapter taps settle in LAST-CLICKED order,
+   *  not last-resolved: a slow fetch for an older tap must not overwrite the
+   *  chapter the user most recently asked for. */
+  const playRequestRef = useRef(0);
   /** 1-based DB segmentIndex of the line currently playing — the server
    *  re-centers its just-in-time voicing window on it with every sync. */
   const segmentIndexRef = useRef(1);
@@ -257,6 +267,7 @@ function AuthenticatedApp({ user, onLogout, bootBooks }: AuthenticatedAppProps) 
 
   const handlePlayChapter = useCallback(
     async (book: Book, chapter: Chapter, resumeMs = 0) => {
+      const requestId = ++playRequestRef.current;
       const unlocked = unlockSharedAudio();
 
       try {
@@ -264,6 +275,7 @@ function AuthenticatedApp({ user, onLogout, bootBooks }: AuthenticatedAppProps) 
           apiFetch(`/api/chapters/${chapter.id}/segments`),
           unlocked,
         ]);
+        if (requestId !== playRequestRef.current) return; // superseded by a newer chapter tap
         if (!response.ok) throw new Error("Failed to load chapter segments");
         const data = (await response.json()) as { segments?: Segment[] };
         const segments = data.segments ?? [];
@@ -311,6 +323,7 @@ function AuthenticatedApp({ user, onLogout, bootBooks }: AuthenticatedAppProps) 
           if (firstVoiced >= 0) startIndex = firstVoiced;
         }
 
+        if (requestId !== playRequestRef.current) return; // re-check before swapping state
         // Flush the outgoing chapter's progress BEFORE swapping refs: the
         // session/position pair must never describe different chapters.
         syncPosition();
@@ -325,6 +338,7 @@ function AuthenticatedApp({ user, onLogout, bootBooks }: AuthenticatedAppProps) 
         setIsPlaying(true);
         setPlaySession((current) => current + 1);
       } catch (error) {
+        if (requestId !== playRequestRef.current) return; // a stale request must not toast
         console.error(error);
         showToast("This chapter is still processing. Try again shortly.", "error");
       }
@@ -430,6 +444,10 @@ function AuthenticatedApp({ user, onLogout, bootBooks }: AuthenticatedAppProps) 
           chapter={activeChapter}
           isPlaying={isPlaying}
           setIsPlaying={setIsPlaying}
+          sleepPreset={sleepPreset}
+          setSleepPreset={setSleepPreset}
+          sleepTimeLeft={sleepTimeLeft}
+          setSleepTimeLeft={setSleepTimeLeft}
           playbackSpeed={playbackSpeed}
           setPlaybackSpeed={setPlaybackSpeed}
           positionRef={positionRef}

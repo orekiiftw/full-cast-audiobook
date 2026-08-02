@@ -88,21 +88,24 @@ export async function resumePendingWork() {
   // jobs lost to a Redis flush are recreated. This is what makes "restart the
   // server" sufficient recovery for any queue-level loss. ("pending" rows are
   // deliberately untouched: they have no job by design — the lookahead window
-  // promotes them only as listening approaches.)
-  let offset = 0;
+  // promotes them only as listening approaches.) Keyset pagination: OFFSET
+  // over the live "queued" set skips rows when other instances concurrently
+  // flip rows out of it between pages.
+  let lastId: string | undefined;
+  let total = 0;
   const PAGE = 5000;
   for (;;) {
-    const queuedRows = await queuedSegmentsQuery()
+    const queuedRows = await queuedSegmentsQuery(lastId)
       .orderBy(asc(segments.id))
-      .limit(PAGE)
-      .offset(offset);
+      .limit(PAGE);
     if (queuedRows.length === 0) break;
     await enqueueSegmentJobs(queuedRows);
-    offset += queuedRows.length;
+    total += queuedRows.length;
+    lastId = queuedRows[queuedRows.length - 1].segmentId;
     if (queuedRows.length < PAGE) break;
   }
-  if (offset > 0) {
-    console.log(`♻️ Re-enqueued ${offset} queued segment job(s) from the DB.`);
+  if (total > 0) {
+    console.log(`♻️ Re-enqueued ${total} queued segment job(s) from the DB.`);
   }
 
   // One immediate sweep for orphaned mid-flight rows, due stitches, and

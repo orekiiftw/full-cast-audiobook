@@ -10,7 +10,7 @@ import {
 } from "../../orchestrator";
 import { json } from "../response";
 import { uploadFile, deleteFile } from "../../r2";
-import { readBodyWithLimit, readJsonWithLimit, ValidationError } from "../../lib/validators";
+import { readBodyWithLimit, readJsonWithLimit, ValidationError, isZipBuffer } from "../../lib/validators";
 import { requireUuid } from "../../lib/validators";
 import { AuthUser } from "../../auth";
 import { ownedBook } from "../ownership";
@@ -98,6 +98,12 @@ export async function registerBookRoutes(req: Request, path: string, user: AuthU
             return json({ error: "Only .epub files are accepted for upload." }, 400);
           }
           epubBuffer = Buffer.from(await file.arrayBuffer());
+          // Verify the ZIP signature before persisting/enqueueing: a renamed
+          // arbitrary file would otherwise be stored and fail deep in the
+          // ingestion worker after consuming storage and queue capacity.
+          if (!isZipBuffer(epubBuffer)) {
+            return json({ error: "The uploaded file is not a valid EPUB (ZIP) archive." }, 400);
+          }
         }
       } catch (err) {
         if (err instanceof ValidationError) throw err;

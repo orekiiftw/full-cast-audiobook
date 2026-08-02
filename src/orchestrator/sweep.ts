@@ -2,11 +2,11 @@
  * Maintenance sweep (runs every QUEUE.SWEEP_INTERVAL_MS via the repeatable job):
  * self-healing pass over DB state that outlived its queue job.
  */
-import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, sql, gt } from "drizzle-orm";
 import { db } from "../db";
 import { books, chapters, segments } from "../schema";
 import { PIPELINE, QUEUE } from "../lib/constants";
-import { emitProgressEvent, enqueueSegmentJobs, enqueueStitch, segmentJobId, segmentQueue } from "../queue";
+import { emitProgressEvent, enqueueSegmentJobs, enqueueStitch, ingestJobId, ingestionQueue, segmentJobId, segmentQueue } from "../queue";
 
 /** Job states in which BullMQ owns the row's lifecycle — never touch these. */
 const LIVE_JOB_STATES = new Set(["wait", "delayed", "prioritized", "active", "waiting-children"]);
@@ -14,9 +14,10 @@ const LIVE_JOB_STATES = new Set(["wait", "delayed", "prioritized", "active", "wa
 /**
  * Queued segments of in-progress books awaiting (re)materialization as BullMQ
  * jobs — shared shape for the sweep's watermark refill and boot recovery
- * paging. Callers append their own orderBy/limit/offset ($dynamic()).
+ * paging. Callers append their own orderBy/limit ($dynamic()). The optional
+ * cursor enables keyset pagination so a shrinking live set can't skip rows.
  */
-export function queuedSegmentsQuery() {
+export function queuedSegmentsQuery(afterSegmentId?: string) {
   return db
     .select({
       segmentId: segments.id,
@@ -28,7 +29,13 @@ export function queuedSegmentsQuery() {
     .from(segments)
     .innerJoin(chapters, eq(segments.chapterId, chapters.id))
     .innerJoin(books, eq(chapters.bookId, books.id))
-    .where(and(eq(segments.status, "queued"), eq(books.status, "in_progress")))
+    .where(
+      and(
+        eq(segments.status, "queued"),
+        eq(books.status, "in_progress"),
+        afterSegmentId ? gt(segments.id, afterSegmentId) : undefined
+      )
+    )
     .$dynamic();
 }
 
@@ -66,10 +73,14 @@ export async function runPipelineSweep(): Promise<void> {
       if (LIVE_JOB_STATES.has(state)) continue; // BullMQ owns it (incl. stalled recovery)
       // The job is gone or terminally failed — the row is orphaned.
       if (job) await job.remove().catch(() => {});
-      if (row.attempts >= PIPELINE.MAX_SEGMENT_ATTEMPTS) {
+      // A job that died WITHOUT the processor's catch running (stalled out
+      // past maxStalledCount) never recorded its attempt in the DB. Count it
+      // here, or a segment that can never finish is requeued forever.
+      const effectiveAttempts = row.attempts + (state === "failed" ? 1 : 0);
+      if (effectiveAttempts >= PIPELINE.MAX_SEGMENT_ATTEMPTS) {
         const newlyFailed = await db
           .update(segments)
-          .set({ status: "failed" })
+          .set({ status: "failed", attempts: effectiveAttempts })
           .where(and(eq(segments.id, row.segmentId), sql`${segments.status} != 'failed'`))
           .returning({ id: segments.id });
         if (newlyFailed.length > 0) {
@@ -89,7 +100,10 @@ export async function runPipelineSweep(): Promise<void> {
         }
         console.warn(`🧹 Sweep marked orphaned segment ${row.segmentId} failed (job state: ${state}).`);
       } else {
-        await db.update(segments).set({ status: "queued" }).where(eq(segments.id, row.segmentId));
+        await db
+          .update(segments)
+          .set({ status: "queued", attempts: effectiveAttempts })
+          .where(eq(segments.id, row.segmentId));
         await enqueueSegmentJobs([row]);
         console.warn(`🧹 Sweep requeued orphaned segment ${row.segmentId} (job state: ${state}).`);
       }
@@ -111,11 +125,21 @@ export async function runPipelineSweep(): Promise<void> {
     }
   }
 
-  // 3. Chapters that finished voicing but never stitched.
+  // 3. Chapters that finished voicing but never stitched. Conditioned on the
+  //    terminal counters (not just status): blindly enqueueing every
+  //    in-flight chapter produced jobs that only early-return, and an active
+  //    early-returning job used to dedupe away the one terminal enqueue that
+  //    mattered. "queued" is included so a counter-terminal chapter whose
+  //    attempts all threw before the status flip still reaches the stitcher.
   const stitchCandidates = await db
     .select()
     .from(chapters)
-    .where(inArray(chapters.status, ["processing", "partial_ready"]))
+    .where(
+      and(
+        inArray(chapters.status, ["queued", "processing", "partial_ready"]),
+        sql`${chapters.voicedCount} + ${chapters.failedCount} >= ${chapters.totalCount}`
+      )
+    )
     .limit(500);
   for (const ch of stitchCandidates) {
     try {
@@ -125,13 +149,33 @@ export async function runPipelineSweep(): Promise<void> {
     }
   }
 
-  // 4. Ingestions whose worker died before marking the book failed.
+  // 4. Ingestions whose worker died before marking the book failed. The
+  //    createdAt age is only a pre-filter — the authoritative check is
+  //    whether BullMQ still owns the job. A retried book keeps its original
+  //    createdAt, so without the liveness check the sweep used to fail
+  //    healthy mid-run ingestions of any book older than INGESTION_STUCK_MS.
   const stuckBefore = new Date(Date.now() - QUEUE.INGESTION_STUCK_MS);
-  const interrupted = await db
-    .update(books)
-    .set({ status: "failed" })
+  const stuckCandidates = await db
+    .select({ id: books.id })
+    .from(books)
     .where(and(inArray(books.status, ["discovering", "casting"]), lt(books.createdAt, stuckBefore)))
-    .returning({ id: books.id });
+    .limit(200);
+  const interrupted: Array<{ id: string }> = [];
+  for (const candidate of stuckCandidates) {
+    try {
+      const job = await ingestionQueue.getJob(ingestJobId(candidate.id));
+      const state = job ? await job.getState() : "unknown";
+      if (LIVE_JOB_STATES.has(state)) continue; // legitimately still running
+      const failedRows = await db
+        .update(books)
+        .set({ status: "failed" })
+        .where(and(eq(books.id, candidate.id), inArray(books.status, ["discovering", "casting"])))
+        .returning({ id: books.id });
+      interrupted.push(...failedRows);
+    } catch (err) {
+      console.error(`Sweep failed for stuck-ingestion check of book ${candidate.id}:`, err);
+    }
+  }
   for (const book of interrupted) {
     emitProgressEvent(book.id, "status_change", { status: "failed", error: "Ingestion was interrupted. Use Retry." });
   }

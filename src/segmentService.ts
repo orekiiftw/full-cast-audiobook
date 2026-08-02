@@ -17,9 +17,16 @@ export function segmentChapter(blocks: BookBlock[]): SegmentInfo[] {
   let currentTextParts: string[] = [];
   let currentWordCount = 0;
   let segmentIndex = 1;
+  // The lead-in budget stays reserved for the FIRST PROSE segment. A chapter
+  // opening with a heading ("Chapter 1") flushes its own tiny segment; without
+  // this flag that heading consumed the ~70-word fast-unlock lead-in, and the
+  // first real paragraph was built with the full 150-250 word budget — so
+  // playback stalled right after the spoken heading.
+  let leadInPending = true;
 
-  // Helper to push current segment
-  const flushSegment = (isSceneBreak: boolean = false) => {
+  // Helper to push current segment. A heading's own segment is marked so it
+  // doesn't consume the reserved lead-in budget.
+  const flushSegment = (isSceneBreak: boolean = false, isHeading: boolean = false) => {
     if (currentTextParts.length > 0) {
       segments.push({
         segmentIndex: segmentIndex++,
@@ -28,13 +35,14 @@ export function segmentChapter(blocks: BookBlock[]): SegmentInfo[] {
       });
       currentTextParts = [];
       currentWordCount = 0;
+      if (!isHeading) leadInPending = false;
     }
   };
 
-  // Lead-in limits apply only while the chapter's first segment is being built.
-  // Evaluated at each decision point because segments.length changes on flush.
+  // Lead-in limits apply only while the chapter's first prose segment is being
+  // built (headings never consume the lead-in).
   const limitsFor = () => {
-    const isLeadIn = segments.length === 0;
+    const isLeadIn = leadInPending;
     return {
       minWords: isLeadIn ? 1 : SEGMENT.MIN_WORDS,
       targetWords: isLeadIn ? SEGMENT.LEAD_IN_WORDS : SEGMENT.TARGET_WORDS,
@@ -59,7 +67,7 @@ export function segmentChapter(blocks: BookBlock[]): SegmentInfo[] {
       flushSegment();
       currentTextParts.push(text);
       currentWordCount += countWords(text);
-      flushSegment(); // headings stay as their own short segments
+      flushSegment(false, true); // headings stay as their own short segments
       continue;
     }
 

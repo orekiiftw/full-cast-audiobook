@@ -1,5 +1,6 @@
 import { json, corsPreflight } from "./response";
 import { ValidationError } from "../lib/validators";
+import { AcquisitionError } from "../acquisition";
 import { registerBookRoutes } from "./routes/books";
 import { registerChapterRoutes } from "./routes/chapters";
 import { registerSegmentRoutes } from "./routes/segments";
@@ -65,7 +66,9 @@ function csrfGuard(req: Request): Response | null {
         const loopbackDevException = isLoopbackHostname(r.hostname) &&
           isLoopbackHostname(o.hostname);
         const allowed =
-          o.host === r.host ||
+          // Full origin match — scheme included. Host-only matching treated
+          // http://host and https://host as equivalent.
+          o.origin === r.origin ||
           loopbackDevException ||
           (!!process.env.CORS_ORIGIN && o.origin === process.env.CORS_ORIGIN.trim());
         if (!allowed) {
@@ -107,9 +110,17 @@ export async function handleRequest(req: Request, connectionIp = "unknown"): Pro
     if (error instanceof ValidationError) {
       return json({ error: error.message }, 400);
     }
-    // Malformed request bodies (e.g. req.json() on invalid JSON) are client errors
-    if (error instanceof SyntaxError) {
-      return json({ error: "Invalid request body" }, 400);
+    // Malformed request bodies (e.g. req.json() on invalid JSON) are client
+    // errors; URIError covers malformed percent-encoding in path segments a
+    // route decodeURIComponent's (e.g. /api/book-search/%zz/x) — also a 400.
+    if (error instanceof SyntaxError || error instanceof URIError) {
+      return json({ error: "Invalid request" }, 400);
+    }
+    // Acquisition-layer errors carry their own safe messages and a retryable
+    // flag: client input problems (unknown provider, bad book id) are 4xx;
+    // an upstream provider outage is a 502, not an internal server error.
+    if (error instanceof AcquisitionError) {
+      return json({ error: error.message }, error.retryable ? 502 : 400);
     }
     // Log the real error server-side; never leak internals (DB errors, file
     // paths, storage backend details) to the client.

@@ -5,20 +5,28 @@ import type { PipelineEvent } from "../types/api";
 interface UseSSEOptions {
   onEvent: (event: PipelineEvent) => void;
   onError?: (error: Event) => void;
+  /**
+   * Fired after a reconnect (never on the initial connection). Consumers use
+   * it to refetch state: events emitted during the outage gap are lost, and
+   * SSE-only views (e.g. BookDetail) would otherwise stay stale indefinitely.
+   */
+  onReconnect?: () => void;
 }
 
-export function useSSE(url: string, { onEvent, onError }: UseSSEOptions) {
+export function useSSE(url: string, { onEvent, onError, onReconnect }: UseSSEOptions) {
   const sourceRef = useRef<EventSource | null>(null);
   const retryCountRef = useRef(0);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const stoppedRef = useRef(false);
   const onEventRef = useRef(onEvent);
   const onErrorRef = useRef(onError);
+  const onReconnectRef = useRef(onReconnect);
 
   useEffect(() => {
     onEventRef.current = onEvent;
     onErrorRef.current = onError;
-  }, [onEvent, onError]);
+    onReconnectRef.current = onReconnect;
+  }, [onEvent, onError, onReconnect]);
 
   const clearReconnect = useCallback(() => {
     if (reconnectTimeoutRef.current !== null) {
@@ -43,7 +51,9 @@ export function useSSE(url: string, { onEvent, onError }: UseSSEOptions) {
     sourceRef.current = source;
 
     source.onopen = () => {
+      const wasReconnect = retryCountRef.current > 0;
       retryCountRef.current = 0;
+      if (wasReconnect) onReconnectRef.current?.();
     };
 
     source.onmessage = (message) => {

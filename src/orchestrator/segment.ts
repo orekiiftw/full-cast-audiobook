@@ -17,12 +17,14 @@ import { emitProgressEvent, enqueueStitch, type SegmentJobData } from "../queue"
 /**
  * Atomically claim a segment for this worker.
  * Returns null if another worker already claimed it (or it was deleted).
+ * The chapterId predicate ties the claim to the job's lineage: a corrupted
+ * or injected job naming a different chapter can never flip the row.
  */
-async function claimSegment(segmentId: string) {
+async function claimSegment(segmentId: string, chapterId: string) {
   const claimed = await db
     .update(segments)
     .set({ status: "processing" })
-    .where(and(eq(segments.id, segmentId), eq(segments.status, "queued")))
+    .where(and(eq(segments.id, segmentId), eq(segments.chapterId, chapterId), eq(segments.status, "queued")))
     .returning();
   return claimed[0] ?? null;
 }
@@ -49,8 +51,10 @@ export async function runSegmentJob(job: Job<SegmentJobData>): Promise<void> {
         .where(and(eq(segments.id, segmentId), inArray(segments.status, ["processing", "annotated"])));
     }
 
-    // Atomic claim — prevents double TTS if the same ID was enqueued twice
-    const segmentData = await claimSegment(segmentId);
+    // Atomic claim — prevents double TTS if the same ID was enqueued twice.
+    // The claim carries this job's lineage so a corrupted/injected Redis job
+    // can never flip a row that belongs to a different book or chapter.
+    const segmentData = await claimSegment(segmentId, chapterId);
     if (!segmentData) {
       return;
     }
@@ -61,10 +65,12 @@ export async function runSegmentJob(job: Job<SegmentJobData>): Promise<void> {
       .where(eq(chapters.id, chapterId))
       .then((rows) => rows[0]);
 
-    if (!chapterData) {
-      // Book/chapter was deleted while the job was in flight. Not an error —
-      // do not burn retry attempts on it.
-      console.warn(`⚠️ Segment job ${segmentId}: chapter ${chapterId} gone (book deleted?). Skipping.`);
+    // Queue-integrity guard: a corrupted or manually-injected Redis job must
+    // not process a segment under the wrong book/chapter context (the audio
+    // key path embeds the job's bookId). Verify lineage before any paid work.
+    if (!chapterData || chapterData.bookId !== bookId) {
+      console.warn(`⚠️ Segment job ${segmentId}: job data does not match DB lineage (book ${bookId}/chapter ${chapterId}). Skipping.`);
+      await db.update(segments).set({ status: "queued" }).where(eq(segments.id, segmentId));
       return;
     }
 
@@ -239,17 +245,45 @@ export async function runSegmentJob(job: Job<SegmentJobData>): Promise<void> {
   } catch (error: unknown) {
     console.error(`❌ Failed to voice segment ${segmentId}:`, error);
 
+    // A failure AFTER the row flipped to "voiced" is post-voiced bookkeeping
+    // (counter bump, progress event, stitch enqueue). It must never requeue
+    // the row for re-voicing (double TTS spend, counter double-bump on the
+    // retry's flip) nor overwrite it to failed. Repair the chapter counters
+    // from ground truth (idempotent) and enqueue the stitch if now terminal;
+    // the BullMQ retry of this job then no-ops at the claim (row is voiced).
+    const current = await db
+      .select({ status: segments.status })
+      .from(segments)
+      .where(eq(segments.id, segmentId))
+      .then((r) => r[0]);
+    if (current?.status === "voiced") {
+      try {
+        const counters = await recomputeChapterCounters(chapterId);
+        if (
+          counters &&
+          counters.totalCount > 0 &&
+          counters.voicedCount + counters.failedCount >= counters.totalCount
+        ) {
+          await enqueueStitch({ bookId, chapterId, chapterIndex: job.data.chapterIndex });
+        }
+      } catch (repairErr) {
+        console.error(`Post-voiced counter repair failed for chapter ${chapterId}:`, repairErr);
+      }
+      throw error;
+    }
+
     const attempts = job.attemptsMade + 1;
     const permanentlyFailed = attempts >= PIPELINE.MAX_SEGMENT_ATTEMPTS;
 
     if (permanentlyFailed) {
       // Fail only this segment — keep the chapter playable for voiced lines.
       // Only bump failedCount when THIS execution flipped the row to failed
-      // (guards a stalled-job race where two attempts both hit the terminal path).
+      // (guards a stalled-job race where two attempts both hit the terminal
+      // path, and never overwrites an already-voiced row).
       const newlyFailed = await db
         .update(segments)
         .set({ attempts, status: "failed" })
-        .where(and(eq(segments.id, segmentId), sql`${segments.status} != 'failed'`))
+        .where(and(eq(segments.id, segmentId), sql`${segments.status} != 'failed'`, sql`${segments.status} != 'voiced'`))
         .returning({ id: segments.id });
 
       if (newlyFailed.length > 0) {
@@ -279,11 +313,12 @@ export async function runSegmentJob(job: Job<SegmentJobData>): Promise<void> {
     } else {
       // Non-terminal failures go back to "queued" so BullMQ's delayed retry can
       // re-claim them; the backoff itself lives in Redis (survives restarts),
-      // replacing the old in-memory setTimeout re-queue.
+      // replacing the old in-memory setTimeout re-queue. Never regress a row
+      // another execution already voiced.
       await db
         .update(segments)
         .set({ attempts, status: "queued" })
-        .where(eq(segments.id, segmentId));
+        .where(and(eq(segments.id, segmentId), sql`${segments.status} != 'voiced'`));
       console.log(
         `⏳ Segment ${segmentId} requeued by BullMQ backoff (attempt ${attempts}/${PIPELINE.MAX_SEGMENT_ATTEMPTS})`
       );
@@ -346,4 +381,32 @@ async function maybeMarkPartialReady(
     status: "partial_ready",
     chapterIndex,
   });
+}
+
+/**
+ * Idempotently recompute a chapter's terminal counters from ground truth.
+ * The hot path uses atomic increments; this repairs drift after a post-voiced
+ * bookkeeping failure (the increments are not retry-safe on their own).
+ */
+async function recomputeChapterCounters(chapterId: string) {
+  await db.execute(sql`
+    UPDATE chapters c
+    SET total_count = s.total, voiced_count = s.voiced, failed_count = s.failed
+    FROM (
+      SELECT COUNT(*)::int AS total,
+             COUNT(*) FILTER (WHERE status = 'voiced')::int AS voiced,
+             COUNT(*) FILTER (WHERE status = 'failed')::int AS failed
+      FROM segments WHERE chapter_id = ${chapterId}
+    ) s
+    WHERE c.id = ${chapterId}
+  `);
+  return db
+    .select({
+      voicedCount: chapters.voicedCount,
+      failedCount: chapters.failedCount,
+      totalCount: chapters.totalCount,
+    })
+    .from(chapters)
+    .where(eq(chapters.id, chapterId))
+    .then((rows) => rows[0]);
 }

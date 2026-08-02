@@ -1,7 +1,7 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 import { tmpdir } from "os";
-import { getTTSProvider } from "../ttsService";
+import { getTTSProvider, isRetryableError } from "../ttsService";
 import { concatWavs, escapeFfmpegConcatPath } from "../audioUtils";
 
 /**
@@ -55,6 +55,10 @@ async function synthesizeBeat(
   try {
     return await getTTSProvider().speak(beat.text, opts.narratorVoice, combinedStylePrompt, opts.pDict);
   } catch (beatErr) {
+    // Permanent errors (missing API key, 400/401/403/422 content rejection)
+    // can never be fixed by a neutral-style retry — rethrow so the real
+    // diagnostic error surfaces instead of doubling the paid synthesis.
+    if (!isRetryableError(beatErr)) throw beatErr;
     console.warn("⚠️ Beat failed with emotional style; retrying neutral.", beatErr);
     const neutralStylePrompt = `${opts.narratorBaseStyle}, speaking in a natural voice with steady narrative flow (emotion intensity: 0.3, pacing: normal)`;
     return getTTSProvider().speak(beat.text, opts.narratorVoice, neutralStylePrompt, opts.pDict);
@@ -65,6 +69,11 @@ async function synthesizeBeat(
  * Fallback beat merge via ffmpeg for beats that can't be spliced in memory
  * (non-PCM or mismatched WAV containers).
  */
+
+/** Max wall-clock time for a single ffmpeg/ffprobe subprocess. */
+const FFMPEG_TIMEOUT_MS = 60_000;
+const FFPROBE_TIMEOUT_MS = 15_000;
+
 async function concatBeatsWithFfmpeg(
   audioBuffers: Buffer[],
   tempDirPrefix: string
@@ -97,9 +106,25 @@ async function concatBeatsWithFfmpeg(
       ],
       { stderr: "pipe", stdout: "pipe" }
     );
-    if ((await proc.exited) !== 0) {
-      const errText = await new Response(proc.stderr).text();
-      throw new Error(`FFmpeg concatenation of beats failed: ${errText}`);
+    // Drain stdout and stderr CONCURRENTLY with the exit promise: reading
+    // one stream to completion before starting the other deadlocks the child
+    // when its pipe buffer fills (ffmpeg is chatty on malformed input).
+    const ffmpegTimer = setTimeout(() => {
+      try { proc.kill("SIGKILL"); } catch { /* already exited */ }
+    }, FFMPEG_TIMEOUT_MS);
+    let ffmpegStderr: string;
+    let ffmpegExit: number;
+    try {
+      [, ffmpegStderr, ffmpegExit] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+    } finally {
+      clearTimeout(ffmpegTimer);
+    }
+    if (ffmpegExit !== 0) {
+      throw new Error(`FFmpeg concatenation of beats failed: ${ffmpegStderr}`);
     }
 
     const durationProc = Bun.spawn(
@@ -112,9 +137,21 @@ async function concatBeatsWithFfmpeg(
       ],
       { stdout: "pipe", stderr: "pipe" }
     );
-    const durationText = await new Response(durationProc.stdout).text();
-    const durationStderr = await new Response(durationProc.stderr).text();
-    const durationExit = await durationProc.exited;
+    const probeTimer = setTimeout(() => {
+      try { durationProc.kill("SIGKILL"); } catch { /* already exited */ }
+    }, FFPROBE_TIMEOUT_MS);
+    let durationText: string;
+    let durationStderr: string;
+    let durationExit: number;
+    try {
+      [durationText, durationStderr, durationExit] = await Promise.all([
+        new Response(durationProc.stdout).text(),
+        new Response(durationProc.stderr).text(),
+        durationProc.exited,
+      ]);
+    } finally {
+      clearTimeout(probeTimer);
+    }
     let durationMs: number;
     if (durationExit !== 0 || !durationText.trim()) {
       console.warn(`ffprobe duration failed (exit ${durationExit}): ${durationStderr}`);

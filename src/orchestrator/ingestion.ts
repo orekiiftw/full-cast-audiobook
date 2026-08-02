@@ -11,13 +11,13 @@ import { downloadBookFromTorrent, searchBookTorrent } from "../torboxService";
 import { bookProviders, UnsupportedFormatError } from "../acquisition";
 import { parseEpub } from "../epubService";
 import { segmentChapter } from "../segmentService";
-import { downloadFile, uploadFile } from "../r2";
+import { downloadFile, uploadFile, deleteFile } from "../r2";
 import { DEFAULT_NARRATOR_VOICE, EPUB_LIMITS, TORRENT } from "../lib/constants";
 import { readStreamWithCap } from "../lib/readStream";
 import { isZipBuffer } from "../lib/validators";
-import { invalidateBookVoiceContext } from "../lib/bookCache";
-import { emitProgressEvent, enqueueIngestion, type IngestionJobData } from "../queue";
+import { emitProgressEvent, enqueueIngestion, invalidateBookVoiceContextClusterwide, type IngestionJobData } from "../queue";
 import { ensureLookahead } from "./lookahead";
+import { maybeMarkBookComplete } from "./stitch";
 
 /**
  * Enqueue a book ingestion. The EPUB for uploads must already be persisted
@@ -119,9 +119,32 @@ export async function runIngestionJob(job: Job<IngestionJobData>): Promise<void>
     // Upload original EPUB to storage immediately and persist the key, so a
     // crash anywhere below is resumable via retryFailedBook. Pre-persisted
     // uploads already have their key.
+    let uploadedEpubHere = false;
     if (!epubR2Key) {
       epubR2Key = `books/${bookId}/original.epub`;
       await uploadFile(epubR2Key, epubBuffer, "application/epub+zip");
+      uploadedEpubHere = true;
+    }
+
+    const bookStillThere = await db
+      .update(books)
+      .set({
+        title: bookTitle,
+        author: bookAuthor,
+        epubR2Key: epubR2Key,
+      })
+      .where(eq(books.id, bookId))
+      .returning({ id: books.id });
+    if (bookStillThere.length === 0) {
+      // The book was deleted while the download/parse was in flight.
+      // deleteBook collected storage keys before this EPUB existed, so purge
+      // the object we just uploaded or it orphans in storage permanently.
+      if (uploadedEpubHere && epubR2Key) {
+        await deleteFile(epubR2Key).catch((err) =>
+          console.warn(`Could not purge EPUB of book deleted mid-ingestion (${bookId}):`, err)
+        );
+      }
+      return;
     }
 
     await db
@@ -148,8 +171,10 @@ export async function runIngestionJob(job: Job<IngestionJobData>): Promise<void>
       })
       .onConflictDoNothing({ target: [castMembers.bookId, castMembers.name] });
     // A retry may have raced a stale cached context — drop it so the next
-    // segment worker reads the fresh narrator/pronunciation rows.
-    invalidateBookVoiceContext(bookId);
+    // segment worker reads the fresh narrator/pronunciation rows. Cluster-wide:
+    // this worker may not be the instance that served the retry/pronunciation
+    // write, and other instances' caches are just as stale.
+    invalidateBookVoiceContextClusterwide(bookId);
 
     // Create chapters and segments in database
     emitProgressEvent(bookId, "status_change", {
@@ -254,6 +279,13 @@ export async function runIngestionJob(job: Job<IngestionJobData>): Promise<void>
     // lines). Playback position syncs re-center and top up the window from
     // here on; the DB rows above remain the system of record.
     await ensureLookahead(bookId);
+
+    // A book whose chapters ALL produced zero segments has no segment or
+    // stitch jobs at all, so nothing else can ever mark it complete — it
+    // would sit "in_progress" forever. Finalize it now (idempotent).
+    if (totalSegmentCount === 0) {
+      await maybeMarkBookComplete(bookId);
+    }
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error(`❌ Ingestion failed for Book ${bookId}:`, error);

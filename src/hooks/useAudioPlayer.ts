@@ -113,10 +113,18 @@ export function useAudioPlayer({
     audioRef.current = audio;
     if (!audio.src || audio.src.startsWith("data:")) return false;
 
-    const generation = ++playGenerationRef.current;
+    // NOTE: play() must NOT bump the generation. loadAndPlay() bumps it to
+    // serialize competing loads; if play() bumped it too, the transport
+    // effect's play() (which runs in the same commit as the mount load)
+    // invalidated an in-flight loadAndPlay before it applied the resume
+    // seek — silently dropping the saved position on every chapter open.
+    // play() reads the current generation and is aborted only by a newer
+    // load (loadAndPlay/pause bump it).
+    const generation = playGenerationRef.current;
     try {
       if (audio.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
-        await waitForEvent(audio, "canplay", 6000);
+        const playable = await waitForEvent(audio, "canplay", 6000);
+        if (!playable) return false; // never became playable — don't play() blindly
       }
       if (!wantPlayingRef.current || generation !== playGenerationRef.current) return false;
 
@@ -155,10 +163,14 @@ export function useAudioPlayer({
   /**
    * Load source, optionally seek, then play — serialized to avoid AbortError races
    * that leave the UI in a "playing" state while the element is paused at 0:00.
+   * `autoplay: false` callers load + seek + leave the element paused (scrubbing
+   * across a segment boundary while paused, or resuming buffering after the
+   * sleep timer paused the player) — loadAndPlay used to always play, so
+   * "paused" callers got audible playback anyway.
    */
   const loadAndPlay = useCallback(
-    async (src: string, seekSec: number | null = null, force = false): Promise<boolean> => {
-      wantPlayingRef.current = true;
+    async (src: string, seekSec: number | null = null, force = false, autoplay = true): Promise<boolean> => {
+      wantPlayingRef.current = autoplay;
       const audio = audioRef.current ?? getSharedAudio();
       audioRef.current = audio;
 
@@ -174,9 +186,13 @@ export function useAudioPlayer({
       const generation = ++playGenerationRef.current;
 
       if (audio.readyState < HTMLMediaElement.HAVE_METADATA) {
-        await waitForEvent(audio, "loadedmetadata", 6000);
+        const metadata = await waitForEvent(audio, "loadedmetadata", 6000);
+        if (!metadata) return false;
       }
-      if (!wantPlayingRef.current || generation !== playGenerationRef.current) return false;
+      // Only a newer load can supersede this one here — a pause during load
+      // must NOT abort the seek (the position should land even if playback is
+      // left paused), so wantPlayingRef is deliberately not checked yet.
+      if (generation !== playGenerationRef.current) return false;
 
       // Skip no-op 0 seeks — assigning currentTime=0 can stall some WAV decoders
       if (seekSec != null && seekSec > 0.05) {
@@ -192,8 +208,11 @@ export function useAudioPlayer({
         }
       }
 
+      if (!autoplay) return true; // loaded and positioned; element stays paused
+
       if (audio.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
-        await waitForEvent(audio, "canplay", 6000);
+        const playable = await waitForEvent(audio, "canplay", 6000);
+        if (!playable) return false;
       }
       if (!wantPlayingRef.current || generation !== playGenerationRef.current) return false;
 

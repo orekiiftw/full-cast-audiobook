@@ -6,14 +6,29 @@ import { AUDIO } from "./lib/constants";
 import { escapeFfmpegConcatPath, silenceWav } from "./audioUtils";
 
 /**
- * Runs a command as a child process using Bun.spawn
+ * Runs a command as a child process using Bun.spawn.
+ * stdout and stderr are drained CONCURRENTLY: reading one stream to
+ * completion before starting the other can deadlock the child when its
+ * stderr pipe buffer fills (ffmpeg is chatty on malformed input).
+ * A hard timeout kills the process so a pathological file can't hold a
+ * worker indefinitely.
  */
-async function runCommand(args: string[]): Promise<{ stdout: string; stderr: string; success: boolean }> {
+const DEFAULT_CMD_TIMEOUT_MS = 5 * 60_000;
+async function runCommand(args: string[], timeoutMs: number = DEFAULT_CMD_TIMEOUT_MS): Promise<{ stdout: string; stderr: string; success: boolean }> {
   const proc = Bun.spawn(args);
-  const stdout = await new Response(proc.stdout).text();
-  const stderr = await new Response(proc.stderr).text();
-  const success = (await proc.exited) === 0;
-  return { stdout, stderr, success };
+  const timer = setTimeout(() => {
+    try { proc.kill("SIGKILL"); } catch { /* already exited */ }
+  }, timeoutMs);
+  try {
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    return { stdout, stderr, success: exitCode === 0 };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -79,9 +94,13 @@ export async function stitchChapter(
     // 2. Download segments in bounded-parallel batches (remote storage makes
     // serialized downloads the dominant stitch cost: N round-trips before
     // ffmpeg could even start), then build the concat list in strict order.
+    // A per-chapter byte budget stops a pathological book (5,000 segments of
+    // large WAVs) from exhausting worker memory/disk and retry-looping.
+    const MAX_CHAPTER_STITCH_BYTES = 4 * 1024 * 1024 * 1024; // 4 GB
     const concatListFilePath = path.join(workDir, "concat_list.txt");
     const DOWNLOAD_CONCURRENCY = 8;
     const rawSegPaths: (string | null)[] = new Array(segments.length).fill(null);
+    let stitchedBytes = 0;
 
     for (let start = 0; start < segments.length; start += DOWNLOAD_CONCURRENCY) {
       await Promise.all(
@@ -96,6 +115,12 @@ export async function stitchChapter(
 
           const rawSegPath = path.join(workDir, `seg_${i}_raw.wav`);
           const rawBytes = await downloadFile(seg.audioR2Key);
+          stitchedBytes += rawBytes.length;
+          if (stitchedBytes > MAX_CHAPTER_STITCH_BYTES) {
+            throw new Error(
+              `Chapter audio exceeds the ${MAX_CHAPTER_STITCH_BYTES / (1024 * 1024 * 1024)}GB stitch budget.`
+            );
+          }
           await fs.writeFile(rawSegPath, rawBytes);
           tempFilesToClean.push(rawSegPath);
           rawSegPaths[i] = rawSegPath;
@@ -108,9 +133,14 @@ export async function stitchChapter(
       const rawSegPath = rawSegPaths[i];
       if (!rawSegPath) continue;
 
-      // Insert silence gap — escape single quotes for FFmpeg concat demuxer
+      // Insert silence gap — escape single quotes for FFmpeg concat demuxer.
+      // isSceneBreak is set on the segment that ENDS a scene (segmentService
+      // flags the buffer flushed at the divider), so the long pause belongs
+      // between the flagged segment and the NEXT one — i.e. before the segment
+      // that follows it. Reading the flag on segments[i] itself used to place
+      // the 700ms pause before the scene's final paragraph instead.
       if (i > 0) {
-        if (segments[i].isSceneBreak) {
+        if (segments[i - 1]?.isSceneBreak) {
           concatLines.push(`file '${escapeFfmpegConcatPath(silence700Path)}'`);
         } else {
           concatLines.push(`file '${escapeFfmpegConcatPath(silence350Path)}'`);

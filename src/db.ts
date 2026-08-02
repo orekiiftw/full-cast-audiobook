@@ -13,8 +13,9 @@ const DEV_FALLBACK = "postgres://postgres:postgres@localhost:5432/audiobook";
 let databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
   if (isProduction) {
-    console.error("❌ CRITICAL: DATABASE_URL is not set. The server cannot start without it in production.");
-    databaseUrl = DEV_FALLBACK; // keeps the import resolvable; the pool will fail to connect anyway
+    // Fail closed: never substitute a hardcoded credential for a missing
+    // production DATABASE_URL — that can silently connect to the wrong DB.
+    throw new Error("CRITICAL: DATABASE_URL is not set. The server cannot start without it in production.");
   } else {
     console.warn(`⚠️ DATABASE_URL is not set. Falling back to local default (${DEV_FALLBACK}). Set DATABASE_URL for anything real.`);
     databaseUrl = DEV_FALLBACK;

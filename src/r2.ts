@@ -87,6 +87,12 @@ export async function uploadFile(key: string, body: Buffer, contentType: string)
   return key;
 }
 
+/**
+ * Downloads an object fully into memory. Used by the stitch path which needs
+ * the whole file for ffmpeg; streaming callers use streamFile instead. A hard
+ * cap prevents a runaway or adversarial object from exhausting worker memory.
+ */
+const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024; // 512 MB
 export async function downloadFile(key: string): Promise<Buffer> {
   assertSafeKey(key);
 
@@ -100,7 +106,15 @@ export async function downloadFile(key: string): Promise<Buffer> {
     if (!response.Body) {
       throw new Error(`File not found: ${key}`);
     }
+    if (response.ContentLength && response.ContentLength > MAX_DOWNLOAD_BYTES) {
+      throw new Error(`Object exceeds the ${MAX_DOWNLOAD_BYTES / (1024 * 1024)}MB download limit: ${key}`);
+    }
+    // transformToByteArray materializes the whole object; cap it so a
+    // pathological object can't OOM the worker before the length check.
     const bytes = await response.Body.transformToByteArray();
+    if (bytes.byteLength > MAX_DOWNLOAD_BYTES) {
+      throw new Error(`Object exceeded the ${MAX_DOWNLOAD_BYTES / (1024 * 1024)}MB download limit: ${key}`);
+    }
     return Buffer.from(bytes);
   }
 

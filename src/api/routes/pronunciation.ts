@@ -1,7 +1,7 @@
 import { db } from "../../db";
 import { pronunciationDict } from "../../schema";
 import { json } from "../response";
-import { invalidateBookVoiceContext } from "../../lib/bookCache";
+import { invalidateBookVoiceContextClusterwide } from "../../queue";
 import { readJsonWithLimit, requireString, requireUuid, ValidationError } from "../../lib/validators";
 import { AuthUser } from "../../auth";
 import { ownedBook } from "../ownership";
@@ -39,7 +39,7 @@ export async function registerPronunciationRoutes(req: Request, path: string, us
 
   // The pipeline caches the pronunciation dict per book — drop it so the
   // next segment voiced picks up this term immediately.
-  invalidateBookVoiceContext(bookId);
+  invalidateBookVoiceContextClusterwide(bookId);
 
   return json({ success: true });
 }

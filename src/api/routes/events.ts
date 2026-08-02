@@ -2,7 +2,7 @@ import { pipelineEvents } from "../../orchestrator";
 import { requireUuid } from "../../lib/validators";
 import { AuthUser } from "../../auth";
 import { ownedBook } from "../ownership";
-import { json } from "../response";
+import { json, corsHeadersForResponse } from "../response";
 
 const EVENTS_RE = /^\/api\/books\/([a-f0-9-]+)\/events$/i;
 const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -94,6 +94,9 @@ export async function registerEventRoutes(req: Request, path: string, user: Auth
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
       "X-Content-Type-Options": "nosniff",
+      // SSE must carry the same CORS headers as JSON responses or an
+      // external-origin SPA (CORS_ORIGIN) can call the API but never stream.
+      ...corsHeadersForResponse(),
     },
   });
 }

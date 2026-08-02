@@ -45,6 +45,11 @@ export function corsPreflight(): Response {
   });
 }
 
+/** CORS headers for non-JSON responses built by hand (e.g. SSE streams). */
+export function corsHeadersForResponse(): Record<string, string> {
+  return corsHeaders();
+}
+
 /**
  * Binary (audio/image) response. Converts Buffer -> Uint8Array so the body
  * satisfies the Fetch BodyInit typings.

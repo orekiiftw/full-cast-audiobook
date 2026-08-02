@@ -2,6 +2,7 @@ import { EventEmitter } from "events";
 import { Queue, Worker, type Job, type JobsOptions, type RedisOptions } from "bullmq";
 import { Redis } from "ioredis";
 import { PIPELINE, QUEUE } from "./lib/constants";
+import { invalidateBookVoiceContext } from "./lib/bookCache";
 import type { BookResult } from "./acquisition";
 
 /**
@@ -131,15 +132,33 @@ export function emitProgressEvent(bookId: string, eventType: string, payload: Re
   });
 }
 
+/**
+ * Invalidate a book's cached voice context (narrator + pronunciation) on this
+ * instance AND every other instance sharing this Redis. The cache in
+ * lib/bookCache is process-local, but pronunciation edits / retries / deletes
+ * must reach the segment workers on every instance — otherwise other
+ * instances keep voicing with the stale dictionary for the full cache TTL.
+ */
+export function invalidateBookVoiceContextClusterwide(bookId: string): void {
+  invalidateBookVoiceContext(bookId); // local (works even if Redis is down)
+  redis.publish(QUEUE.VOICE_INVALIDATE_CHANNEL, bookId).catch((err) => {
+    console.warn("⚠️ Failed to publish voice-context invalidation:", err.message);
+  });
+}
+
 export async function initEventBridge(): Promise<void> {
-  redisSub.on("message", (_channel: string, message: string) => {
+  redisSub.on("message", (channel: string, message: string) => {
+    if (channel === QUEUE.VOICE_INVALIDATE_CHANNEL) {
+      invalidateBookVoiceContext(message);
+      return;
+    }
     try {
       pipelineEvents.emit("progress", JSON.parse(message));
     } catch {
       // Malformed event payload — drop it; events are best-effort.
     }
   });
-  await redisSub.subscribe(QUEUE.EVENTS_CHANNEL);
+  await redisSub.subscribe(QUEUE.EVENTS_CHANNEL, QUEUE.VOICE_INVALIDATE_CHANNEL);
 }
 
 // ---------------------------------------------------------------------------

@@ -194,6 +194,10 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
   useSSE(`/api/books/${bookId}/events`, {
     onEvent: handlePipelineEvent,
     onError: () => console.warn("SSE connection interrupted. Reconnecting…"),
+    // Events emitted during the reconnect gap were missed — this view is
+    // SSE-only (no polling fallback), so refetch or chapter rows stay stale
+    // indefinitely until an unrelated event happens to arrive.
+    onReconnect: () => void fetchDetails(),
   });
 
   useEffect(() => {

@@ -1,10 +1,10 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { chapters, segments } from "../../schema";
 import { annotateSegment, extractBeats } from "../../annotationService";
 import { uploadFile } from "../../r2";
 import { emitProgressEvent, restitchChapterInBackground } from "../../orchestrator";
-import { acquireLock, releaseLock } from "../../queue";
+import { acquireLock, releaseLock, segmentQueue, segmentJobId } from "../../queue";
 import { synthesizeSegmentAudio } from "../../lib/voiceSegment";
 import { getBookVoiceContext } from "../../lib/bookCache";
 import { json } from "../response";
@@ -53,9 +53,29 @@ export async function registerSegmentRoutes(req: Request, path: string, user: Au
     return json({ error: "This segment is already being regenerated. Please wait for it to finish." }, 409);
   }
   try {
+    // Cancel any pending/delayed pipeline job for this segment so a delayed
+    // BullMQ retry cannot fire, reset the row from "processing" back to
+    // "queued" (segment.ts:47-52), and re-claim it — racing the regeneration
+    // and double-spending on TTS. Active jobs are locked but will no-op at
+    // their own claim (status is "processing", not "queued").
+    await segmentQueue.remove(segmentJobId(segmentId)).catch(() => {});
+
     emitProgressEvent(bookId, "progress_log", {
       message: `Regenerating segment ${segmentData.segmentIndex}...`,
     });
+
+    // Atomically claim the segment before any paid synthesis. The Redis lock
+    // only guards regen-vs-regen; without this DB transition, a queued
+    // pipeline worker can claim and voice the same segment concurrently
+    // (duplicate TTS spend, last-write-wins audio).
+    const claimed = await db
+      .update(segments)
+      .set({ status: "processing" })
+      .where(and(eq(segments.id, segmentId), sql`${segments.status} != 'processing'`))
+      .returning({ id: segments.id });
+    if (claimed.length === 0) {
+      return json({ error: "This segment is currently being processed. Try again shortly." }, 409);
+    }
 
     // Narrator + pronunciation dict from the per-book cache (per-book invariants)
     const { narratorVoice, narratorBaseStyle, pDict } = await getBookVoiceContext(bookId);
@@ -93,7 +113,8 @@ export async function registerSegmentRoutes(req: Request, path: string, user: Au
 
     // Keep chapter terminal counters consistent: a regenerated FAILED segment
     // moves failed→voiced. Anything else (re-voicing an already-voiced line)
-    // leaves counters unchanged.
+    // leaves counters unchanged. Read the status captured BEFORE our claim
+    // transitioned the row to "processing".
     const counters = segmentData.status === "failed"
       ? await db
           .update(chapters)

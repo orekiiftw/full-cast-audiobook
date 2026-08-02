@@ -96,7 +96,20 @@ export async function ensureLookahead(
       segmentId: r.segmentId,
       segmentIndex: r.segmentIndex,
     }));
-  await enqueueSegmentJobs(tasks);
+  try {
+    await enqueueSegmentJobs(tasks);
+  } catch (err) {
+    // The promotion committed but the enqueue failed — roll still-queued rows
+    // back to "pending" so the next ensureLookahead re-drives them, instead of
+    // stranding them "queued" with no job until the sweep's watermark refill.
+    // Rows a worker already claimed (processing) are untouched.
+    await db
+      .update(segments)
+      .set({ status: "pending" })
+      .where(and(inArray(segments.id, [...promotedIds]), eq(segments.status, "queued")))
+      .catch(() => {});
+    throw err;
+  }
 }
 
 /** Per book+chapter throttle — the chapters endpoint (which triggers this) is

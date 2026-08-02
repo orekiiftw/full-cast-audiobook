@@ -26,7 +26,10 @@ export async function runStitchJob(job: Job<StitchJobData>): Promise<void> {
     .from(chapters)
     .where(eq(chapters.id, chapterId))
     .then((r) => r[0]);
-  if (!ch || ch.status === "ready") return;
+  // Note: "ready" chapters deliberately fall through — a regen re-stitch job
+  // (restitchChapterInBackground) targets exactly that state, and the
+  // terminal-counter check below is the real guard against stale/early jobs.
+  if (!ch) return;
 
   if (ch.totalCount === 0) {
     // A chapter with no segments (e.g. a decorative/blank EPUB spine item)
@@ -156,7 +159,7 @@ export function restitchChapterInBackground(bookId: string, chapterId: string, c
 }
 
 /** Mark book ready when every chapter is terminal (ready or failed). */
-async function maybeMarkBookComplete(bookId: string) {
+export async function maybeMarkBookComplete(bookId: string) {
   // Single aggregate row instead of fetching every chapter row (up to 2,000)
   // on each chapter completion.
   const stats = await db

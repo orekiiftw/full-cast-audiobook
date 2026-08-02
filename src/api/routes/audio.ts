@@ -34,7 +34,22 @@ export async function registerAudioRoutes(req: Request, path: string, user: Auth
 
   try {
     const { size } = await statFile(key);
-    const range = resolveRange(req.headers.get("range"), size);
+    const rangeHeader = req.headers.get("range");
+    const range = resolveRange(rangeHeader, size);
+
+    // A present-but-unsatisfiable Range must be 416, not a silent full-file
+    // 200 (which breaks browser seeking and wastes a full object transfer).
+    if (rangeHeader && !range) {
+      return new Response(null, {
+        status: 416,
+        headers: {
+          "Content-Range": `bytes */${size}`,
+          "Accept-Ranges": "bytes",
+          "X-Content-Type-Options": "nosniff",
+          "Cache-Control": "no-store",
+        },
+      });
+    }
 
     // Pass the already-known size so streamFile skips its own stat/HEAD —
     // one storage round-trip per audio request instead of two.
@@ -53,9 +68,10 @@ export async function registerAudioRoutes(req: Request, path: string, user: Auth
         "Content-Length": String(result.length),
         "Accept-Ranges": "bytes",
         "X-Content-Type-Options": "nosniff",
-        // Immutable-ish segment/chapter audio (URL carries a ?v= cache buster
-        // on regeneration), so the browser can reuse a fully prefetched file.
-        "Cache-Control": "private, max-age=31536000, immutable",
+        // Authenticated audio: cache briefly for seek/replay smoothness, but
+        // never immutably for a year — a shared browser would otherwise keep
+        // serving a previous user's audio long after logout.
+        "Cache-Control": "private, max-age=300",
         ...(result.partial
           ? { "Content-Range": `bytes ${range!.start}-${range!.end}/${result.totalSize}` }
           : {}),

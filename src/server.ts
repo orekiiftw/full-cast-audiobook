@@ -91,7 +91,11 @@ const SECURITY_HEADERS: Record<string, string> = {
  */
 function hstsHeader(req: Request): Record<string, string> {
   const url = new URL(req.url);
-  const forwardedProto = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  // Only honor X-Forwarded-Proto when proxy trust is explicitly configured;
+  // otherwise a client can induce HSTS over a plaintext deployment.
+  const forwardedProto = process.env.TRUST_PROXY === "true"
+    ? req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim()
+    : undefined;
   const isHttps = url.protocol === "https:" || forwardedProto === "https";
   return isHttps ? { "Strict-Transport-Security": "max-age=63072000; includeSubDomains" } : {};
 }

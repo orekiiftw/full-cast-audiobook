@@ -3,6 +3,11 @@ import { DEFAULT_TEXT_MODEL } from "./lib/constants";
 
 const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || DEFAULT_TEXT_MODEL;
 
+/** Bound one stalled upstream annotation request so the segment job fails
+ *  promptly (and BullMQ retries) instead of parking the worker until stall
+ *  recovery re-runs the job — which used to duplicate the paid Gemini call. */
+const ANNOTATION_TIMEOUT_MS = 120_000;
+
 // The SDK client is stateless config; building it per segment (previously)
 // re-parsed env and re-allocated its HTTP plumbing on every call.
 let sharedClient: { apiKey: string; ai: GoogleGenAI } | null = null;
@@ -116,6 +121,17 @@ export function extractBeats(annotatedJson: unknown): BeatAnnotation[] {
  * Generates emotional beat annotations for a segment using Gemini.
  * Output is performance direction only (emotion/style/intensity/pace) —
  * the whole book is voiced by the single Narrator.
+ *
+ * TRUST BOUNDARY (prompt injection): currentText / prevSegments /
+ * runningSummary are book-derived and attacker-influenceable (a hostile EPUB
+ * from a torrent can embed instructions to the model). The output is
+ * normalized + length-capped (normalizeAnnotation), the beat text is
+ * core-alignment-checked against the input below, and the delivery fields
+ * only ever reach the MiMo TTS style prompt. So injected content can distort
+ * narration style or poison the running scene summary, but it cannot alter
+ * the voiced text, exfiltrate secrets, or reach any other system. Keep it
+ * that way: never feed raw model output into prompts, tools, or queries
+ * without the same validation.
  */
 export async function annotateSegment(
   currentText: string,
@@ -169,13 +185,29 @@ Current Segment Text to Annotate:
 `;
 
   console.log(`🤖 Invoking Gemini annotation model for segment...`);
-  const response = await ai.models.generateContent({
-    model: GEMINI_TEXT_MODEL,
-    contents: prompt,
-    config: {
-      responseMimeType: "application/json",
-    },
-  });
+  // AbortController actually cancels the upstream HTTP request on timeout —
+  // a bare Promise.race leaves the paid Gemini call running in the background
+  // while the segment falls back and retries, duplicating spend.
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), ANNOTATION_TIMEOUT_MS);
+  let response;
+  try {
+    response = await ai.models.generateContent({
+      model: GEMINI_TEXT_MODEL,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        abortSignal: abort.signal,
+      },
+    });
+  } catch (err) {
+    if (abort.signal.aborted) {
+      throw new Error(`Gemini annotation timed out after ${ANNOTATION_TIMEOUT_MS / 1000}s.`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 
   const rawText = response.text;
   if (!rawText) {
@@ -186,12 +218,19 @@ Current Segment Text to Annotate:
     const parsed = JSON.parse(rawText) as unknown;
     const result = normalizeAnnotation(parsed, currentText, runningSummary);
 
-    // Safety check: verify text matches the input segment
+    // Safety check: verify text matches the input segment. Compare the
+    // letter/digit cores after collapsing whitespace and punctuation: the old
+    // length-only ±15 check let a model silently drop or alter up to 15
+    // characters (or normalize punctuation at equal length) pass, so the TTS
+    // could voice text that didn't match the printed segment. Whitespace,
+    // smart quotes, dashes, and mid-word splits ("Hel lo") are cosmetic for
+    // alignment; letter/digit differences are not.
     const concatenatedBeats = result.beats.map((b) => b.text).join(" ").replace(/\s+/g, " ").trim();
     const cleanedInput = currentText.replace(/\s+/g, " ").trim();
+    const core = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
     // If the text alignment fails, fall back to a single beat to ensure we do not lose content
-    if (Math.abs(concatenatedBeats.length - cleanedInput.length) > 15) {
+    if (core(concatenatedBeats) !== core(cleanedInput)) {
       console.warn("⚠️ Annotation text alignment warning. Falling back to single-beat mapping.");
       return {
         scene_summary: result.scene_summary || runningSummary,
