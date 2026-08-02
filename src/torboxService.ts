@@ -345,7 +345,9 @@ export function assertSafeDownloadUrl(raw: string): string {
   // returned by the authenticated requestdl endpoint; reject anything else.
   const isTorBoxHost = (h: string) => h === "torbox.app" || h.endsWith(".torbox.app") || h === "tb-cdn.pw" || h.endsWith(".tb-cdn.pw");
   if (!isTorBoxHost(host)) {
-    throw new Error("TorBox returned a download URL on an unexpected host.");
+    // The signed URL itself must never be logged, but the hostname is safe and
+    // needed to update this allowlist when TorBox adds a CDN domain.
+    throw new Error(`TorBox returned a download URL on an unexpected host: ${host}`);
   }
   // Defense-in-depth: an allowlisted CDN entry pointing at a private IP via
   // DNS still must not be fetched.
