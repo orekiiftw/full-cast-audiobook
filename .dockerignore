@@ -1,0 +1,26 @@
+# Never ship local artifacts into the image — node_modules in particular
+# carries host-native binaries (esbuild, sharp, ...) that break on the
+# container's platform/arch. bun.lock is copied explicitly for the
+# reproducible install inside the image.
+node_modules
+dist
+.storage
+
+# Local machine state / secrets
+.git
+.env
+.env.*
+*.log
+*.tsbuildinfo
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+.idea
+.vscode
+tmp
+temp
+*.tmp
+
+# Test artifacts not needed at runtime
+src/test-pipeline.ts
