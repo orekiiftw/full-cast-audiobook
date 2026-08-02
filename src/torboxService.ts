@@ -198,15 +198,21 @@ function pickBestEpubTorrent(hits: TorrentHit[], title: string, author: string):
   const titleTokens = tokenize(title); const authorTokens = tokenize(author);
   // Gate on whatever can be verified. A title whose tokens all collapse to
   // nothing (words ≤ 2 chars, e.g. "It") must still match an author token —
-  // otherwise the gate was vacuous and any high-seed EPUB won the pick.
-  const gateTokens = titleTokens.length > 0 ? titleTokens : authorTokens;
+  // otherwise the gate was vacuous and any high-seed EPUB won the pick. For a
+  // real title, require every meaningful title token: matching only a generic
+  // word (e.g. "Lord") can otherwise select a completely unrelated book.
   const scored = hits.filter((t) => t.hash.length >= 32 && (t.size <= 0 || t.size <= MAX_TORRENT_BYTES)).map((t) => {
-    const name = t.name.toLowerCase(); let score = 0;
+    const name = t.name.toLowerCase();
+    const nameTokens = tokenize(t.name);
+    const matchesQuery = titleTokens.length > 0
+      ? titleTokens.every((token) => nameTokens.includes(token))
+      : authorTokens.some((token) => nameTokens.includes(token));
+    let score = 0;
     if (/\.epub\b|\bepub\b/i.test(name)) score += 50; if (/\.pdf\b/i.test(name)) score -= 20; if (/\.mobi\b|\.azw/i.test(name)) score -= 5; if (/\baudiobook\b|\bmp3\b|\bm4b\b/i.test(name)) score -= 40;
     for (const token of titleTokens) if (name.includes(token)) score += 8; for (const token of authorTokens) if (name.includes(token)) score += 4;
     score += Math.min(t.seeds, 50); if (t.size > 0 && t.size < 20 * 1024 * 1024) score += 10; if (t.size > 50 * 1024 * 1024) score -= 10;
-    return { t, score };
-  }).filter(({ t, score }) => /\bepub\b|\.epub\b/i.test(t.name) && gateTokens.length > 0 && gateTokens.some((token) => t.name.toLowerCase().includes(token)) && score > 0).sort((a, b) => b.score - a.score || b.t.seeds - a.t.seeds);
+    return { t, score, matchesQuery };
+  }).filter(({ t, score, matchesQuery }) => /\bepub\b|\.epub\b/i.test(t.name) && matchesQuery && score > 0).sort((a, b) => b.score - a.score || b.t.seeds - a.t.seeds);
   return scored[0]?.t ?? null;
 }
 function tokenize(value: string): string[] { return value.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((word) => word.length > 2 && !["the", "and", "for"].includes(word)); }

@@ -133,3 +133,36 @@ test("searchBookTorrent does not retry when the TorBox search quota is zero", as
   expect(torboxCalls()).toBe(1);
   expect(magnet).toContain(`magnet:?xt=urn:btih:${"a".repeat(40)}`);
 });
+
+test("searchBookTorrent rejects a fallback hit that only shares a generic title word", async () => {
+  process.env.TORBOX_API_KEY = "test-key";
+  globalThis.fetch = mock(async (input: RequestInfo | URL): Promise<Response> => {
+    const url = String(input);
+    if (url.startsWith("https://search-api.torbox.app/")) {
+      throw new Error("Unable to connect. Is the computer able to access the url?");
+    }
+    if (url.startsWith("https://apibay.org/")) {
+      return new Response(JSON.stringify([]), { status: 200 });
+    }
+    if (url.startsWith("https://torrents-csv.com/")) {
+      return new Response(
+        JSON.stringify({
+          torrents: [
+            {
+              name: "Act Like a Lady, Think Like a Lord: A Mystery by Celeste Connally EPUB",
+              infohash: "b".repeat(40),
+              size_bytes: 4_000_000,
+              seeders: 3,
+            },
+          ],
+        }),
+        { status: 200 }
+      );
+    }
+    throw new Error(`Unexpected fetch in test: ${url}`);
+  }) as unknown as typeof fetch;
+
+  await expect(searchBookTorrent("Lord of the Mysteries", "Yuan Ye")).rejects.toThrow(
+    "Could not find torrent"
+  );
+});
