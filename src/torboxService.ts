@@ -3,9 +3,13 @@ import { readStreamWithCap } from "./lib/readStream";
 import { isZipBuffer } from "./lib/validators";
 import { lookup as dnsLookup } from "node:dns/promises";
 
-const TORBOX_API_KEY = process.env.TORBOX_API_KEY;
 const MAIN_API_URL = "https://api.torbox.app/v1/api";
 const SEARCH_API_URL = "https://search-api.torbox.app";
+
+/** Read lazily (not at module load) so tests and runtime env changes apply. */
+function torboxApiKey(): string | undefined {
+  return process.env.TORBOX_API_KEY;
+}
 const MAX_TORRENT_BYTES = TORRENT.MAX_FILE_SIZE_BYTES;
 
 /** No fetch may hang forever: a stalled socket used to park an ingestion
@@ -108,41 +112,49 @@ export async function searchBookTorrent(title: string, author: string): Promise<
   throw new Error(`Could not find torrent. ${errors.join(" | ")}`);
 }
 
+/**
+ * Single bounded retry delay for rate-limited / 5xx TorBox search responses.
+ * Everything else (network failure, timeout, empty results, zero quota) fails
+ * straight through to the fallback indexers — the old 4s + 8s backoff stalled
+ * every book search ~12s before the fallbacks behind TorBox even ran.
+ */
+const SEARCH_RETRY_DELAY_MS = 750;
+
 async function searchTorBox(query: string): Promise<TorrentHit[]> {
-  if (!TORBOX_API_KEY) throw new Error("TORBOX_API_KEY not set");
-  let lastError: Error | null = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (attempt) await new Promise((resolve) => setTimeout(resolve, Math.min(2000 * 2 ** attempt, 15_000)));
+  const apiKey = torboxApiKey();
+  if (!apiKey) throw new Error("TORBOX_API_KEY not set");
+  let lastError: Error = new Error("TorBox search failed");
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    let res: Response;
     try {
-      const res = await fetch(`${SEARCH_API_URL}/torrents/search/${encodeURIComponent(query)}`, {
-        headers: { Authorization: `Bearer ${TORBOX_API_KEY}`, Accept: "application/json" },
+      res = await fetch(`${SEARCH_API_URL}/torrents/search/${encodeURIComponent(query)}`, {
+        headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
         signal: AbortSignal.timeout(API_TIMEOUT_MS),
       });
-      if (res.status === 429) {
-        const body = await readBodyText(res, ERROR_TEXT_CAP, "TorBox search").catch(() => "");
-        if (/0 per/i.test(body)) throw new Error("TorBox Search API quota is 0 on this account (use fallback indexers)");
-        lastError = new Error("Rate limited (429)");
-        continue;
-      }
-      if (!res.ok) {
-        // 5xx is transient — retry like 429 instead of abandoning the best
-        // provider on its first hiccup.
-        lastError = new Error(`HTTP ${res.status}`);
-        continue;
-      }
+    } catch (err) {
+      // DNS/connect/timeout: won't heal within this search session — hand off
+      // to the fallback indexers immediately instead of sleeping through retries.
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+    if (res.status === 429) {
+      const body = await readBodyText(res, ERROR_TEXT_CAP, "TorBox search").catch(() => "");
+      // A zero-quota account can never succeed — no retry, straight to fallbacks.
+      if (/0 per/i.test(body)) throw new Error("TorBox Search API quota is 0 on this account (use fallback indexers)");
+      lastError = new Error("Rate limited (429)");
+    } else if (!res.ok) {
+      // 5xx is transient — earns the single bounded retry below.
+      lastError = new Error(`HTTP ${res.status}`);
+    } else {
       const json = await readJson<{ data?: unknown; torrents?: unknown; error?: string }>(res, "TorBox search");
       const rows = normalizeList(json.data ?? json.torrents);
-      if (!rows.length) {
-        lastError = new Error(json.error || "No results returned");
-        continue;
-      }
+      // No results is a definitive answer for this query, not a transient
+      // failure — retrying the identical query just stalls the fallbacks.
+      if (!rows.length) throw new Error(json.error || "No results returned");
       return rows.map((item) => ({ name: str(item, ["name", "titleFull", "title"]) || "Unknown", hash: cleanHash(str(item, ["hash", "info_hash", "infohash"])), size: num(item, ["size", "size_bytes", "filesize"]), seeds: num(item, ["seeds", "seeders", "seed"]), source: "torbox" }));
-    } catch (err) {
-      // Network failures, timeouts, and malformed bodies are transient — retry.
-      lastError = err instanceof Error ? err : new Error(String(err));
     }
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, SEARCH_RETRY_DELAY_MS));
   }
-  throw lastError ?? new Error("TorBox search retries exhausted");
+  throw lastError;
 }
 
 async function searchApibay(queries: string[]): Promise<TorrentHit[]> {
@@ -205,11 +217,12 @@ function num(item: Record<string, unknown>, keys: string[]): number { for (const
 
 /** Checks if a torrent hash is already cached in TorBox */
 export async function isTorrentCached(hash: string): Promise<boolean> {
-  if (!TORBOX_API_KEY) return false;
+  const apiKey = torboxApiKey();
+  if (!apiKey) return false;
   try {
     const clean = cleanHash(hash.replace("magnet:?xt=urn:btih:", "").split("&")[0]);
     const res = await fetch(`${MAIN_API_URL}/torrents/checkcached?hash=${clean}&format=list`, {
-      headers: { Authorization: `Bearer ${TORBOX_API_KEY}` },
+      headers: { Authorization: `Bearer ${apiKey}` },
       signal: AbortSignal.timeout(API_TIMEOUT_MS),
     });
     if (!res.ok) return false;
@@ -220,7 +233,8 @@ export async function isTorrentCached(hash: string): Promise<boolean> {
 
 /** Downloads an EPUB through TorBox, enforcing a streamed 200MB limit. */
 export async function downloadBookFromTorrent(magnetOrHash: string, onProgress?: (message: string) => void): Promise<{ buffer: Buffer; filename: string }> {
-  if (!TORBOX_API_KEY) throw new Error("TorBox API Key is not configured in .env file.");
+  const apiKey = torboxApiKey();
+  if (!apiKey) throw new Error("TorBox API Key is not configured in .env file.");
   let magnet = magnetOrHash;
   if (!magnet.startsWith("magnet:") && /^[0-9a-fA-F]{40}$/.test(magnet)) magnet = `magnet:?xt=urn:btih:${magnet}`;
   onProgress?.("Checking cache status...");
@@ -230,7 +244,7 @@ export async function downloadBookFromTorrent(magnetOrHash: string, onProgress?:
   const form = new FormData(); form.append("magnet", magnet); form.append("seed", "3");
   const createRes = await fetch(`${MAIN_API_URL}/torrents/createtorrent`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${TORBOX_API_KEY}` },
+    headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
     signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
@@ -245,7 +259,7 @@ export async function downloadBookFromTorrent(magnetOrHash: string, onProgress?:
   for (let poll = 0; poll < TORRENT.MAX_POLLS; poll++) {
     try {
       const result = await fetch(`${MAIN_API_URL}/torrents/mylist?id=${torrentId}`, {
-        headers: { Authorization: `Bearer ${TORBOX_API_KEY}` },
+        headers: { Authorization: `Bearer ${apiKey}` },
         signal: AbortSignal.timeout(API_TIMEOUT_MS),
       });
       if (result.ok) {
@@ -287,8 +301,8 @@ export async function downloadBookFromTorrent(magnetOrHash: string, onProgress?:
   // the API token as a query parameter. The CDN URL it returns already
   // embeds a one-time token in its own query string, so query-string
   // credentials are inherent to this provider's design. Never log this URL.
-  const linkResponse = await fetch(`${MAIN_API_URL}/torrents/requestdl?torrent_id=${torrentId}&file_id=${target.id}&zip_link=false&token=${encodeURIComponent(TORBOX_API_KEY)}`, {
-    headers: { Authorization: `Bearer ${TORBOX_API_KEY}` },
+  const linkResponse = await fetch(`${MAIN_API_URL}/torrents/requestdl?torrent_id=${torrentId}&file_id=${target.id}&zip_link=false&token=${encodeURIComponent(apiKey)}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
     signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
   if (!linkResponse.ok) throw new Error(`Failed to request download link (${linkResponse.status}): ${errorResText(await readBodyText(linkResponse, ERROR_TEXT_CAP, "TorBox requestdl")) || linkResponse.statusText}`);

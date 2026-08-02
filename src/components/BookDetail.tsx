@@ -474,7 +474,16 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
           </h3>
           <div className="font-mono text-[11px] text-cinema-400 max-h-28 overflow-y-auto space-y-1.5 pr-2">
             {progressLog.length === 0 ? (
-              <p className="italic text-cinema-600">Waiting for cues…</p>
+              // A just-added book is enqueued before this view (and its SSE
+              // stream) opens, so the first progress events can be missed and
+              // the console would otherwise sit on a dead "Waiting for cues…"
+              // while ingestion is already running. Derive a status-based line
+              // instead of waiting for the next event to arrive.
+              <p className="italic text-cinema-600">
+                {book.status === "discovering"
+                  ? "Starting up — acquisition and parsing updates land here shortly…"
+                  : "Waiting for cues…"}
+              </p>
             ) : (
               progressLog.map((log, index) => {
                 const isError = /fail|error|quota|⛔|❌/i.test(log);
