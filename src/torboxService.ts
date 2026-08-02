@@ -360,10 +360,14 @@ export function assertSafeDownloadUrl(raw: string): string {
     throw new Error("TorBox returned a non-HTTPS download URL.");
   }
   const host = url.hostname.toLowerCase();
-  // TorBox serves files from its own CDNs: historically *.torbox.app, now
-  // *.tb-cdn.pw (e.g. https://nexus-008.indi.tb-cdn.pw/dld/...). Both are
+  // TorBox serves files from its own CDNs: historically *.torbox.app, then
+  // *.tb-cdn.pw (e.g. https://nexus-008.indi.tb-cdn.pw/dld/...), and now
+  // *.tb-cdn.io (e.g. https://store-079.wnam.tb-cdn.io/dld/...). All are
   // returned by the authenticated requestdl endpoint; reject anything else.
-  const isTorBoxHost = (h: string) => h === "torbox.app" || h.endsWith(".torbox.app") || h === "tb-cdn.pw" || h.endsWith(".tb-cdn.pw");
+  const isTorBoxHost = (h: string) =>
+    h === "torbox.app" || h.endsWith(".torbox.app") ||
+    h === "tb-cdn.pw" || h.endsWith(".tb-cdn.pw") ||
+    h === "tb-cdn.io" || h.endsWith(".tb-cdn.io");
   if (!isTorBoxHost(host)) {
     // The signed URL itself must never be logged, but the hostname is safe and
     // needed to update this allowlist when TorBox adds a CDN domain.
