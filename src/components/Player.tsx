@@ -18,24 +18,20 @@ interface PlayerProps {
   chapter: Chapter;
   isPlaying: boolean;
   setIsPlaying: (playing: boolean) => void;
-  /** Sleep-timer state lives in App so it survives chapter changes: Player is
-   *  remounted (via key) on every chapter switch, which used to reset the
-   *  timer mid-book. */
+  /** Hoisted to App: Player remounts on chapter switch, which would reset the timer mid-book. */
   sleepPreset: number | null;
   setSleepPreset: (preset: number | null) => void;
   sleepTimeLeft: number | null;
   setSleepTimeLeft: (left: number | null) => void;
   playbackSpeed: number;
   setPlaybackSpeed: (speed: number) => void;
-  /** Shared position sink: updated on every timeupdate without re-rendering App. */
+  /** Updated on every timeupdate without re-rendering App. */
   positionRef: MutableRefObject<number>;
   segmentsList: Segment[];
   setSegmentsList: (segs: Segment[]) => void;
   currentSegmentIndex: number;
   setCurrentSegmentIndex: (idx: number) => void;
-  /** Position to resume from when the player mounts (0 = start from the top). */
   initialPositionMs?: number;
-  /** Fires when the chapter finishes and no further lines are generating. */
   onChapterEnded?: () => void;
 }
 
@@ -47,7 +43,6 @@ const SLEEP_OPTIONS = [
   { label: "1 hr", seconds: 3600 },
 ];
 
-/** Next index that isn't permanently failed, or -1 if none. */
 function findNextIndex(segs: Segment[], fromExclusive: number): number {
   let next = fromExclusive + 1;
   while (next < segs.length && segs[next].status === "failed") next += 1;
@@ -83,24 +78,17 @@ export default function Player({
   const [isExpanded, setIsExpanded] = useState(false);
   const [isBufferingNext, setIsBufferingNext] = useState(false);
 
-  // Local display state for position. The exact value always lands in
-  // positionRef; the re-rendering state only advances at 1s granularity so
-  // the sheet (and its long segment list) renders ~1x/sec instead of ~4x/sec.
+  // Display state advances at 1s granularity so the sheet renders ~1x/sec instead of ~4x/sec;
+  // the exact value always lands in positionRef.
   const [positionMs, setPositionMsState] = useState(initialPositionMs);
   const setPositionMs = useCallback(
     (pos: number) => {
       positionRef.current = pos;
-      setPositionMsState((prev) =>
-        pos === 0 || Math.floor(pos / 1000) !== Math.floor(prev / 1000) ? pos : prev
-      );
+      setPositionMsState((prev) => (pos === 0 || Math.floor(pos / 1000) !== Math.floor(prev / 1000) ? pos : prev));
     },
-    [positionRef]
+    [positionRef],
   );
 
-  // Sleep timer state is hoisted to App (Player remounts on chapter change).
-  // The sleep UI reads sleepPreset/sleepTimeLeft from props below.
-
-  // Regeneration modal state
   const [showRegenModal, setShowRegenModal] = useState(false);
   const [regenSegmentId, setRegenSegmentId] = useState<string | null>(null);
   const [regenInstruction, setRegenInstruction] = useState("");
@@ -114,10 +102,8 @@ export default function Player({
   const segmentElsRef = useRef(new Map<string, HTMLDivElement>());
   /** True after the current line finished and we're waiting for a later line to voice. */
   const awaitingNextRef = useRef(false);
-  /** Hidden preload <audio> used to warm the next segment's bytes/decode so the
-   *  boundary between segments is near-instant. Shares the session via cookies. */
+  /** Hidden preload <audio> warming the next segment's bytes/decode so the boundary is near-instant. */
   const prefetchAudioRef = useRef<HTMLAudioElement | null>(null);
-  /** URL currently being (or already) prefetched by prefetchAudioRef. */
   const prefetchUrlRef = useRef<string | null>(null);
 
   const segmentsListRef = useRef(segmentsList);
@@ -125,10 +111,8 @@ export default function Player({
   const isPlayingRef = useRef(isPlaying);
   const isBufferingNextRef = useRef(isBufferingNext);
 
-  // Apply resume offset before any load effects run (layout effect fires
-  // synchronously after render, before paint and before the passive effects
-  // that attach media handlers — a plain effect would race loadedmetadata
-  // and drop the seek). Render stays pure; StrictMode-safe.
+  // Layout effect (not a plain effect) so the resume offset lands before the
+  // media-handler effects attach — otherwise loadedmetadata races and drops the seek.
   useLayoutEffect(() => {
     if (resumeSeekReadyRef.current || initialPositionMs <= 0) return;
     resumeSeekReadyRef.current = true;
@@ -173,10 +157,9 @@ export default function Player({
       return;
     }
 
-    // End of known list
     const stillGenerating = segs.some((s) => isPendingStatus(s.status));
     if (stillGenerating) {
-      // Stay put and wait — when the next line after idx voices, advance.
+      // Wait — when the next line after idx voices, advance.
       awaitingNextRef.current = true;
       setIsBufferingNext(true);
     } else {
@@ -192,11 +175,11 @@ export default function Player({
     (segmentMs: number) => {
       setPositionMs(precedingMsRef.current + segmentMs);
     },
-    [setPositionMs]
+    [setPositionMs],
   );
 
   const handlePlayBlocked = useCallback(() => {
-    // Autoplay policy blocked us — flip UI to Play so the next tap is a gesture
+    // Autoplay policy blocked us — flip UI to Play so the next tap is a gesture.
     setIsPlaying(false);
   }, [setIsPlaying]);
 
@@ -205,26 +188,16 @@ export default function Player({
     onTimeUpdate: handleAudioTimeUpdate,
     onPlayBlocked: handlePlayBlocked,
   });
-  const {
-    play,
-    pause,
-    loadAndPlay,
-    seekTo,
-    setPlaybackRate,
-    getCurrentTime,
-    isActuallyPaused,
-  } = audioPlayer;
+  const { play, pause, loadAndPlay, seekTo, setPlaybackRate, getCurrentTime, isActuallyPaused } = audioPlayer;
 
-  /** Toggle play; if UI thinks we're playing but the element is paused (autoplay
-   * block / aborted load), retry play on this user gesture instead of pausing.
-   * While buffering, the pause control cancels the wait instead of no-op retry. */
+  /** If UI says playing but the element is paused (autoplay block / aborted load), retry play on this
+   * user gesture instead of pausing. While buffering, pause cancels the wait instead of no-op retry. */
   const togglePlayPause = useCallback(() => {
     if (!isPlayingRef.current) {
       setIsPlaying(true);
       void play();
       return;
     }
-    // User wants to stop waiting for the next line
     if (isBufferingNextRef.current) {
       awaitingNextRef.current = false;
       setIsBufferingNext(false);
@@ -246,10 +219,8 @@ export default function Player({
     }
   }, []);
 
-  /**
-   * Load a segment and optionally start playback in one serialized pipeline
-   * (metadata → seek → canplay → play) so races don't leave us paused at 0:00.
-   */
+  /** Load a segment and start playback in one serialized pipeline (metadata → seek → canplay → play)
+   * so races don't leave us paused at 0:00. */
   const loadSegmentSource = useCallback(
     (seg: Segment, opts: { force?: boolean; autoplay?: boolean } = {}) => {
       if (!seg.audioUrl) return;
@@ -261,40 +232,27 @@ export default function Player({
       const isSame = !force && loadedSegmentKeyRef.current === key && lastSrcRef.current === base;
 
       const seekSec = pendingSeekSecRef.current;
-      // Consume pending seek once — loadAndPlay applies it after metadata
       if (seekSec != null) pendingSeekSecRef.current = null;
 
       lastSrcRef.current = url;
       loadedSegmentKeyRef.current = key;
-      // Note: playback rate is applied by its own effect on mount and on every
-      // change — deliberately NOT here, so a speed toggle doesn't change this
-      // callback's identity and re-fire the whole segment-load effect.
-
+      // Playback rate is applied by its own effect, deliberately NOT here, so a
+      // speed toggle doesn't re-fire this whole segment-load effect.
       if (!isSame) {
         void loadAndPlay(url, seekSec, force, autoplay).then((ok) => {
           if (!ok && autoplay && isPlayingRef.current && isActuallyPaused()) {
-            // Stay flagged playing only if element actually started; otherwise show Play
-            // (onPlayBlocked may already have flipped state)
+            // Stay flagged playing only if the element actually started.
           }
         });
       } else if (autoplay) {
         void play();
       }
     },
-    [loadAndPlay, play, isActuallyPaused]
+    [loadAndPlay, play, isActuallyPaused],
   );
 
-  /**
-   * Warm the browser HTTP cache + audio decode buffer for the segment that
-   * will play right after the current one. With the server now streaming WAVs
-   * with Range/Content-Length, the browser finishes fetching this file in the
-   * background while the current line is still playing — so when the boundary
-   * fires, loadAndPlay() hits a warm cache and canplay arrives in tens of
-   * milliseconds instead of a multi-second network round-trip.
-   *
-   * Only prefetches voiced, ready-to-play segments (never pending/failed ones),
-   * and skips when the target URL is already being prefetched.
-   */
+  /** Warm the browser HTTP cache + decode buffer for the next segment so the boundary is near-instant.
+   * Only prefetches voiced segments; skips when the target URL is already being prefetched. */
   const prefetchNextSegment = useCallback(() => {
     const segs = segmentsListRef.current;
     const idx = currentSegmentIndexRef.current;
@@ -318,7 +276,6 @@ export default function Player({
     prefetchUrlRef.current = url;
   }, []);
 
-  // Discard prefetch state on unmount
   useEffect(() => {
     return () => {
       const el = prefetchAudioRef.current;
@@ -333,8 +290,7 @@ export default function Player({
 
   const refreshSegments = useCallback(async () => {
     try {
-      // Anchor the server's just-in-time voicing window on the line we're
-      // waiting for (1-based DB segmentIndex, not the 0-based list offset).
+      // Anchor the JIT voicing window on the line we're waiting for (1-based DB segmentIndex).
       const at = segmentsListRef.current[currentSegmentIndexRef.current]?.segmentIndex ?? 1;
       const res = await apiFetch(`/api/chapters/${chapter.id}/segments?at=${at}`);
       if (!res.ok) return null;
@@ -348,25 +304,20 @@ export default function Player({
     }
   }, [chapter.id, setSegmentsList]);
 
-  /**
-   * After a refresh, either:
-   * - advance past a finished line into a newly ready next line, or
-   * - start a newly voiced active line we were buffering on.
-   */
+  /** After a refresh: advance past a finished line into a newly ready next line, or start a newly
+   * voiced active line we were buffering on. */
   const resumeFromFreshSegments = useCallback(
     (fresh: Segment[]) => {
       const idx = currentSegmentIndexRef.current;
 
-      // Finished last known line → walk forward to the next playable/pending line
       if (awaitingNextRef.current) {
         const next = findNextIndex(fresh, idx);
         if (next >= 0) {
           awaitingNextRef.current = false;
-          // If next is already voiced, index change loads it; if pending, load effect buffers
           setCurrentSegmentIndex(next);
           return;
         }
-        // Still nothing after current — keep buffering only if work remains
+        // Still nothing after current — keep buffering only if work remains.
         if (!fresh.some((s) => isPendingStatus(s.status))) {
           awaitingNextRef.current = false;
           setIsBufferingNext(false);
@@ -381,24 +332,13 @@ export default function Player({
       }
 
       const active = fresh[idx];
-      if (
-        isBufferingNextRef.current &&
-        isPlayableSegment(active) &&
-        loadedSegmentKeyRef.current?.split(":")[0] !== active.id
-      ) {
+      if (isBufferingNextRef.current && isPlayableSegment(active) && loadedSegmentKeyRef.current?.split(":")[0] !== active.id) {
         clearPoll();
         setIsBufferingNext(false);
         loadSegmentSource(active, { autoplay: isPlayingRef.current });
       }
     },
-    [
-      setCurrentSegmentIndex,
-      setIsPlaying,
-      setPositionMs,
-      onChapterEnded,
-      clearPoll,
-      loadSegmentSource,
-    ]
+    [setCurrentSegmentIndex, setIsPlaying, setPositionMs, onChapterEnded, clearPoll, loadSegmentSource],
   );
 
   const startPollingForSegment = useCallback(
@@ -408,7 +348,6 @@ export default function Player({
         const freshSegments = await refreshSegments();
         if (!freshSegments) return;
 
-        // Prefer the dedicated resume path (handles end-of-list + active)
         if (awaitingNextRef.current || isBufferingNextRef.current) {
           resumeFromFreshSegments(freshSegments);
           return;
@@ -422,15 +361,11 @@ export default function Player({
         }
       }, 1200);
     },
-    [clearPoll, refreshSegments, loadSegmentSource, resumeFromFreshSegments]
+    [clearPoll, refreshSegments, loadSegmentSource, resumeFromFreshSegments],
   );
 
-  // Live updates from the pipeline — pick up newly voiced segments quickly but
-  // throttled: with several workers voicing concurrently, segment_ready events
-  // arrive in bursts and each one used to trigger a full segment-list refetch
-  // (every rawText in the chapter) plus a transcript re-render. Coalesce to at
-  // most one refresh per window, with a trailing call so the final state
-  // always lands.
+  // SSE: pick up newly voiced segments quickly, but coalesce bursts to at most one refresh per
+  // window (with a trailing call) so concurrent workers don't trigger a refetch per event.
   const SSE_REFRESH_MIN_MS = 500;
   const lastSseRefreshRef = useRef(0);
   const sseRefreshTimerRef = useRef<number | null>(null);
@@ -458,7 +393,7 @@ export default function Player({
         }, SSE_REFRESH_MIN_MS - elapsed);
       }
     },
-    [chapter.id, runSseRefresh]
+    [chapter.id, runSseRefresh],
   );
 
   useEffect(
@@ -468,22 +403,20 @@ export default function Player({
         sseRefreshTimerRef.current = null;
       }
     },
-    []
+    [],
   );
 
   useSSE(`/api/books/${book.id}/events`, {
     onEvent: handlePipelineEvent,
-    // Events emitted during the reconnect gap were missed — resync from the
-    // DB instead of staying stale until the next unrelated event arrives.
+    // Events emitted during the reconnect gap were missed — resync from the DB.
     onReconnect: runSseRefresh,
   });
 
-  // Load and play the active segment — only reloads when the active identity/URL changes
+  // Load and play the active segment — only reloads when the active identity/URL changes.
   useEffect(() => {
     const activeSegment = segmentsList[currentSegmentIndex];
     if (!activeSegment) return;
 
-    // Auto-skip permanently failed segments
     if (activeSegment.status === "failed") {
       const next = findNextIndex(segmentsList, currentSegmentIndex);
       if (next >= 0) {
@@ -509,7 +442,6 @@ export default function Player({
       awaitingNextRef.current = false;
 
       if (!alreadyLoaded) {
-        // Serialized load → seek → play (avoids paused-at-0:00 abort races)
         loadSegmentSource(activeSegment, { autoplay: isPlaying });
       } else if (isPlaying && isActuallyPaused()) {
         void play();
@@ -518,8 +450,7 @@ export default function Player({
     }
 
     if (isPendingStatus(activeSegment.status) || !activeSegment.audioUrl) {
-      // Only live-buffer while the user still wants playback. Pausing must not
-      // immediately re-enter "Performing next line…" mode.
+      // Only live-buffer while the user still wants playback.
       if (!isPlaying) {
         clearPoll();
         if (isBufferingNextRef.current) setIsBufferingNext(false);
@@ -527,7 +458,7 @@ export default function Player({
         pause();
         return;
       }
-      // Don't restart the poll on every segmentsList identity change
+      // Don't restart the poll on every segmentsList identity change.
       if (!isBufferingNextRef.current || pollIntervalRef.current === null) {
         pause();
         setIsBufferingNext(true);
@@ -548,15 +479,12 @@ export default function Player({
     isActuallyPaused,
   ]);
 
-  // Prefetch the next segment whenever the active line or playing state
-  // changes, or when fresh segments arrive (a newly voiced next line should
-  // be warmed immediately). Cheap when already prefetched.
+  // Prefetch the next segment when the active line, playing state, or segments change.
   useEffect(() => {
     if (!isPlaying) return;
     prefetchNextSegment();
   }, [isPlaying, currentSegmentIndex, segmentsList, prefetchNextSegment]);
 
-  // Cleanup poll on unmount
   useEffect(() => clearPoll, [clearPoll]);
 
   // Play / pause transport (does not remount sources)
@@ -566,13 +494,12 @@ export default function Player({
     } else if (!isPlaying) {
       pause();
     }
-    // While buffering with isPlaying=true, leave the element paused without
-    // clearing wantPlaying — resumeFromFreshSegments will loadAndPlay next.
+    // While buffering with isPlaying=true, leave the element paused — resumeFromFreshSegments
+    // will loadAndPlay next.
   }, [isPlaying, isBufferingNext, play, pause]);
 
-  // Watchdog: UI says playing but element is still paused (aborted autoplay / stall).
-  // Keep retrying while media loads; only flip to Play after several failed attempts
-  // once the element reports it could play.
+  // Watchdog: UI says playing but the element is still paused (aborted autoplay / stall). Flip to
+  // Play only after several failed retries once the element reports it could play.
   useEffect(() => {
     if (!isPlaying || isBufferingNext) return;
     let readyFails = 0;
@@ -588,14 +515,12 @@ export default function Player({
           return;
         }
         readyFails += 1;
-        // ~4s of failed retries after the element should be playable
-        if (readyFails >= 5) setIsPlaying(false);
+        if (readyFails >= 5) setIsPlaying(false); // ~4s of failed retries
       });
     }, 800);
     return () => window.clearInterval(id);
   }, [isPlaying, isBufferingNext, play, isActuallyPaused, setIsPlaying]);
 
-  // Playback speed
   useEffect(() => {
     setPlaybackRate(playbackSpeed);
   }, [playbackSpeed, setPlaybackRate]);
@@ -605,24 +530,20 @@ export default function Player({
       seekTo(getCurrentTime() + seconds);
       if (isPlayingRef.current && !isBufferingNextRef.current) void play();
     },
-    [seekTo, getCurrentTime, play]
+    [seekTo, getCurrentTime, play],
   );
 
-  // Keyboard shortcuts: Space = play/pause, Arrows = ±10s
+  // Space = play/pause, Arrows = ±10s
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
-      // Never hijack keys typed into form controls or the regen modal: Space
-      // on a focused <select> used to both block the dropdown and toggle
-      // playback, and Space on the modal's "Perform line" button both
-      // submitted AND toggled. Excluding buttons also avoids the double
-      // activation from Space's native click.
+      // Never hijack keys typed into form controls or the regen modal: Space on a focused <select>
+      // used to both block the dropdown and toggle playback.
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
       if (target instanceof HTMLSelectElement || target instanceof HTMLButtonElement) return;
       if (target && target.isContentEditable) return;
       if (showRegenModal) return;
-      // Holding a key fires repeated keydowns — ignore auto-repeat so a held
-      // arrow doesn't skip minutes of audio in a second.
+      // Ignore auto-repeat so a held arrow doesn't skip minutes of audio in a second.
       if (e.repeat) return;
       if (e.code === "Space") {
         e.preventDefault();
@@ -639,17 +560,13 @@ export default function Player({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [seekRelative, togglePlayPause, showRegenModal]);
 
-  // Keep the active segment in view while reading. Intentionally NOT keyed on
-  // segmentsList: refresh polls give it a new identity every ~1.2s, which
-  // would yank the viewport back to the active line while the user reads ahead.
+  // Keep the active segment in view while reading. Intentionally NOT keyed on segmentsList: refresh
+  // polls give it a new identity every ~1.2s, which would yank the viewport back while reading ahead.
   useEffect(() => {
     if (!isExpanded) return;
     const seg = segmentsList[currentSegmentIndex];
     if (!seg) return;
-    segmentElsRef.current
-      .get(seg.id)
-      ?.scrollIntoView({ behavior: "smooth", block: "center" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    segmentElsRef.current.get(seg.id)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [isExpanded, currentSegmentIndex]);
 
   // Stable callbacks for memoized SegmentRow (refs keep them identity-stable)
@@ -661,7 +578,7 @@ export default function Player({
       setCurrentSegmentIndex(idx);
       if (!isPlayingRef.current) setIsPlaying(true);
     },
-    [setCurrentSegmentIndex, setIsPlaying]
+    [setCurrentSegmentIndex, setIsPlaying],
   );
 
   const registerSegmentRef = useCallback((id: string, el: HTMLDivElement | null) => {
@@ -685,7 +602,7 @@ export default function Player({
       goToSegment(next);
       return;
     }
-    // At end while lines still generating — enter wait mode
+    // At end while lines still generating — enter wait mode.
     if (segmentsList.some((s) => isPendingStatus(s.status))) {
       awaitingNextRef.current = true;
       setIsBufferingNext(true);
@@ -695,12 +612,10 @@ export default function Player({
   };
 
   const canGoPrev = findPrevIndex(segmentsList, currentSegmentIndex) >= 0;
-  const canGoNext =
-    findNextIndex(segmentsList, currentSegmentIndex) >= 0 ||
-    segmentsList.some((s) => isPendingStatus(s.status));
+  const canGoNext = findNextIndex(segmentsList, currentSegmentIndex) >= 0 || segmentsList.some((s) => isPendingStatus(s.status));
 
   const handleSeek = (ratio: number) => {
-    // Only seek within segments that have known duration (voiced)
+    // Only seek within segments that have known duration (voiced).
     const seekable = segmentsList.map((s) => s.durationMs ?? 0);
     const total = seekable.reduce((a, b) => a + b, 0);
     if (total <= 0) return;
@@ -709,7 +624,7 @@ export default function Player({
     let accumulated = 0;
     for (let i = 0; i < segmentsList.length; i++) {
       const dur = seekable[i];
-      // Skip zero-duration (unvoiced) slots for landing; still count them in accumulation as 0
+      // Skip zero-duration (unvoiced) slots for landing.
       if (dur <= 0) {
         if (i === segmentsList.length - 1 && isPlayableSegment(segmentsList[i])) {
           pendingSeekSecRef.current = 0;
@@ -752,7 +667,7 @@ export default function Player({
           const segData = (await segRes.json()) as { segments?: Segment[] };
           const fresh = segData.segments ?? [];
           setSegmentsList(fresh);
-          // Force reload if the regenerated line is currently loaded
+          // Force reload if the regenerated line is currently loaded.
           const active = fresh[currentSegmentIndexRef.current];
           if (active && active.id === regenSegmentId && isPlayableSegment(active)) {
             lastSrcRef.current = null;
@@ -775,8 +690,7 @@ export default function Player({
   };
 
   const totalChapterDurationMs = segmentsList.reduce((acc, s) => acc + (s.durationMs ?? 0), 0);
-  const progressPercent =
-    totalChapterDurationMs > 0 ? Math.min(100, (positionMs / totalChapterDurationMs) * 100) : 0;
+  const progressPercent = totalChapterDurationMs > 0 ? Math.min(100, (positionMs / totalChapterDurationMs) * 100) : 0;
 
   const voicedCount = segmentsList.filter((s) => s.status === "voiced").length;
   const bufferPercent = segmentsList.length > 0 ? (voicedCount / segmentsList.length) * 100 : 0;
@@ -804,29 +718,19 @@ export default function Player({
 
       {!isExpanded && (
         <div className="max-w-6xl mx-auto px-5 sm:px-6 h-full flex items-center justify-between gap-4">
-          <button
-            className="flex items-center gap-3.5 min-w-0 text-left group flex-1"
-            onClick={() => setIsExpanded(true)}
-          >
+          <button className="flex items-center gap-3.5 min-w-0 text-left group flex-1" onClick={() => setIsExpanded(true)}>
             <div className="min-w-0">
               <span className="text-[10px] text-gold-400/90 uppercase tracking-[0.18em] truncate flex items-center gap-2 font-medium">
                 {book.title}
-                <span
-                  className={`eq text-gold-400 ${showPlayingUi ? "" : "eq-paused"}`}
-                  aria-hidden="true"
-                >
-                  <span /><span /><span />
+                <span className={`eq text-gold-400 ${showPlayingUi ? "" : "eq-paused"}`} aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
                 </span>
               </span>
-              <span className="font-serif text-[15px] font-medium block text-white truncate mt-0.5">
-                {chapter.title}
-              </span>
+              <span className="font-serif text-[15px] font-medium block text-white truncate mt-0.5">{chapter.title}</span>
             </div>
-            <Icon
-              name="chevronUp"
-              size={16}
-              className="text-cinema-500 shrink-0 transition-transform group-hover:-translate-y-0.5"
-            />
+            <Icon name="chevronUp" size={16} className="text-cinema-500 shrink-0 transition-transform group-hover:-translate-y-0.5" />
           </button>
 
           <div className="flex items-center gap-4 sm:gap-5">
@@ -864,14 +768,8 @@ export default function Player({
           <div className="flex justify-between items-start border-b border-white/[0.05] pb-5 mb-5">
             <div className="min-w-0">
               <span className="label-caps text-gold-400/90 block truncate">{book.title}</span>
-              <h2 className="font-serif text-2xl sm:text-3xl font-medium text-gradient truncate mt-1">
-                {chapter.title}
-              </h2>
-              {isBufferingNext && (
-                <p className="text-xs text-gold-400 mt-2 animate-pulse-soft tracking-wide">
-                  Performing next line…
-                </p>
-              )}
+              <h2 className="font-serif text-2xl sm:text-3xl font-medium text-gradient truncate mt-1">{chapter.title}</h2>
+              {isBufferingNext && <p className="text-xs text-gold-400 mt-2 animate-pulse-soft tracking-wide">Performing next line…</p>}
             </div>
             <Button variant="ghost" size="sm" onClick={() => setIsExpanded(false)} className="shrink-0">
               Collapse
@@ -891,11 +789,7 @@ export default function Player({
             <div className="flex items-center gap-5">
               <div className="flex items-center gap-2">
                 <span className="label-caps">Speed</span>
-                <select
-                  value={playbackSpeed}
-                  onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
-                  className={selectClass}
-                >
+                <select value={playbackSpeed} onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))} className={selectClass}>
                   {[0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0].map((s) => (
                     <option key={s} value={s}>
                       {s}x
@@ -959,8 +853,7 @@ export default function Player({
 
       <Modal isOpen={showRegenModal} onClose={() => setShowRegenModal(false)} title="Redo this line">
         <p className="text-xs text-cinema-400 leading-relaxed">
-          Direct the performance — e.g.{" "}
-          <span className="italic text-cinema-300">“whisper this, with more fear”</span>.
+          Direct the performance — e.g. <span className="italic text-cinema-300">“whisper this, with more fear”</span>.
         </p>
         <textarea
           rows={3}
@@ -969,12 +862,7 @@ export default function Player({
           placeholder="e.g. slower pace, with suppressed anger…"
           className="input-field resize-none !text-xs min-h-[5rem]"
         />
-        <Button
-          variant="primary"
-          className="w-full"
-          onClick={handleRegenerateSegment}
-          isLoading={isRegenerating}
-        >
+        <Button variant="primary" className="w-full" onClick={handleRegenerateSegment} isLoading={isRegenerating}>
           {isRegenerating ? "Re-performing…" : "Perform line"}
         </Button>
       </Modal>

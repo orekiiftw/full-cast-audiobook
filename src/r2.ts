@@ -3,19 +3,10 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { isSafeStorageKey } from "./audioUtils";
 
-/**
- * Storage backend selection is fixed at boot:
- * - R2 when fully configured → R2 only (no silent local fallback)
- * - otherwise → local ./.storage only
- *
- * Mixing backends on failure caused split-brain (write local / read R2 → 404).
- */
-const hasR2 = !!(
-  process.env.R2_ACCESS_KEY_ID &&
-  process.env.R2_SECRET_ACCESS_KEY &&
-  process.env.R2_ENDPOINT &&
-  process.env.R2_BUCKET
-);
+/** Storage backend selection is fixed at boot: R2 when fully configured (R2 only, no silent local
+    fallback), otherwise local ./.storage only. Mixing backends on failure caused split-brain
+    (write local / read R2 → 404). */
+const hasR2 = !!(process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_ENDPOINT && process.env.R2_BUCKET);
 
 const s3Client = hasR2
   ? new S3Client({
@@ -30,9 +21,7 @@ const s3Client = hasR2
   : null;
 
 if (!hasR2) {
-  console.warn(
-    "⚠️ R2 Storage environment variables are not fully configured. Using local file storage under './.storage/'"
-  );
+  console.warn("⚠️ R2 Storage environment variables are not fully configured. Using local file storage under './.storage/'");
 }
 
 const LOCAL_STORAGE_DIR = path.resolve("./.storage");
@@ -69,15 +58,14 @@ export async function uploadFile(key: string, body: Buffer, contentType: string)
           Key: key,
           Body: body,
           ContentType: contentType,
-        })
+        }),
       );
       return key;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       // Don't include the bucket name in the (potentially client-facing) message.
       throw new Error(
-        `R2 upload failed for "${key}": ${msg}. ` +
-          `Create the bucket in Cloudflare R2 or clear R2_* env vars to use local ./.storage/.`
+        `R2 upload failed for "${key}": ${msg}. ` + `Create the bucket in Cloudflare R2 or clear R2_* env vars to use local ./.storage/.`,
       );
     }
   }
@@ -87,11 +75,9 @@ export async function uploadFile(key: string, body: Buffer, contentType: string)
   return key;
 }
 
-/**
- * Downloads an object fully into memory. Used by the stitch path which needs
- * the whole file for ffmpeg; streaming callers use streamFile instead. A hard
- * cap prevents a runaway or adversarial object from exhausting worker memory.
- */
+/** Downloads an object fully into memory (used by the stitch path which needs the whole file for
+    ffmpeg; streaming callers use streamFile). A hard cap prevents a runaway object from exhausting
+    worker memory. */
 const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024; // 512 MB
 export async function downloadFile(key: string): Promise<Buffer> {
   assertSafeKey(key);
@@ -101,7 +87,7 @@ export async function downloadFile(key: string): Promise<Buffer> {
       new GetObjectCommand({
         Bucket: R2_BUCKET,
         Key: key,
-      })
+      }),
     );
     if (!response.Body) {
       throw new Error(`File not found: ${key}`);
@@ -109,8 +95,8 @@ export async function downloadFile(key: string): Promise<Buffer> {
     if (response.ContentLength && response.ContentLength > MAX_DOWNLOAD_BYTES) {
       throw new Error(`Object exceeds the ${MAX_DOWNLOAD_BYTES / (1024 * 1024)}MB download limit: ${key}`);
     }
-    // transformToByteArray materializes the whole object; cap it so a
-    // pathological object can't OOM the worker before the length check.
+    // transformToByteArray materializes the whole object; cap it so a pathological object can't OOM
+    // the worker before the length check.
     const bytes = await response.Body.transformToByteArray();
     if (bytes.byteLength > MAX_DOWNLOAD_BYTES) {
       throw new Error(`Object exceeded the ${MAX_DOWNLOAD_BYTES / (1024 * 1024)}MB download limit: ${key}`);
@@ -126,10 +112,8 @@ export async function downloadFile(key: string): Promise<Buffer> {
   }
 }
 
-/**
- * Deletes an object from the active backend. Missing files are treated as
- * already deleted (idempotent), so callers can purge best-effort.
- */
+/** Deletes an object from the active backend. Missing files are treated as already deleted
+    (idempotent), so callers can purge best-effort. */
 export async function deleteFile(key: string): Promise<void> {
   if (!isSafeStorageKey(key)) return;
 
@@ -138,7 +122,7 @@ export async function deleteFile(key: string): Promise<void> {
       new DeleteObjectCommand({
         Bucket: R2_BUCKET,
         Key: key,
-      })
+      }),
     );
     return;
   }
@@ -173,16 +157,9 @@ export interface StreamResult {
   partial: boolean;
 }
 
-/**
- * Resolves a HTTP "Range" header value into a normalized [start, end] pair
- * against `totalSize`, or returns null when it is absent / unsatisfiable.
- * Supports the common "bytes=START-END", "bytes=START-", and "bytes=-N"
- * (last N bytes) forms.
- */
-export function resolveRange(
-  rangeHeader: string | null | undefined,
-  totalSize: number
-): StreamRange | null {
+/** Resolves an HTTP "Range" header into a normalized [start, end] pair against `totalSize`, or null
+    when absent / unsatisfiable. Supports "bytes=START-END", "bytes=START-", and "bytes=-N". */
+export function resolveRange(rangeHeader: string | null | undefined, totalSize: number): StreamRange | null {
   if (!rangeHeader) return null;
   const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
   if (!match) return null;
@@ -208,17 +185,13 @@ export function resolveRange(
   return { start, end };
 }
 
-/**
- * Stats an object (total size only today). Used to set Content-Length and to
- * validate range bounds without downloading the body.
- */
+/** Stats an object (total size only) — used to set Content-Length and validate range bounds without
+    downloading the body. */
 export async function statFile(key: string): Promise<FileStat> {
   assertSafeKey(key);
 
   if (s3Client && R2_BUCKET) {
-    const head = await s3Client.send(
-      new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key })
-    );
+    const head = await s3Client.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }));
     const size = head.ContentLength ?? 0;
     if (size <= 0) {
       // Fall through to the not-found path so the caller surfaces a 404.
@@ -232,39 +205,27 @@ export async function statFile(key: string): Promise<FileStat> {
   return { size: stat.size };
 }
 
-/**
- * Streams an object (or a byte range of it) directly from the storage backend
- * to the client — never materializing the whole file in memory. Honors HTTP
- * Range requests so the browser can seek and buffer incrementally inside a
- * WAV/MP3 instead of waiting for the entire object to download before the
- * first sample can play. This is what makes segment-to-segment transitions
- * feel instant (combined with client-side prefetching).
- *
- * Callers should set: 206 + Content-Range when `partial`, 200 otherwise;
- * Content-Length = `length`; Accept-Ranges: bytes; and the right Content-Type.
- *
- * `knownSize` lets a caller that already stated the object (e.g. the audio
- * route) skip a duplicate HeadObject/fs.stat round-trip — on remote storage
- * that extra HEAD doubled time-to-first-byte for every audio request.
- */
+/** Streams an object (or a byte range of it) directly from storage without materializing the whole
+    file. Honors HTTP Range so the browser can seek inside a WAV/MP3 instead of waiting for the whole
+    object before the first sample — this makes segment transitions feel instant with client prefetch.
+
+    Callers set: 206 + Content-Range when `partial`, else 200; Content-Length = `length`;
+    Accept-Ranges: bytes; and the right Content-Type. `knownSize` skips a duplicate HeadObject/fs.stat
+    round-trip — on remote storage that extra HEAD doubled time-to-first-byte per audio request. */
 export async function streamFile(key: string, range: StreamRange | null, knownSize?: number): Promise<StreamResult> {
   assertSafeKey(key);
 
   if (s3Client && R2_BUCKET) {
     let totalSize = knownSize ?? 0;
     if (totalSize <= 0) {
-      const totalHead = await s3Client.send(
-        new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key })
-      );
+      const totalHead = await s3Client.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }));
       totalSize = totalHead.ContentLength ?? 0;
     }
     if (totalSize <= 0) {
       throw new Error(`File not found: ${key}`);
     }
 
-    const requested = range
-      ? { start: range.start, end: Math.min(range.end, totalSize - 1) }
-      : { start: 0, end: totalSize - 1 };
+    const requested = range ? { start: range.start, end: Math.min(range.end, totalSize - 1) } : { start: 0, end: totalSize - 1 };
     const length = requested.end - requested.start + 1;
 
     const get = await s3Client.send(
@@ -272,18 +233,17 @@ export async function streamFile(key: string, range: StreamRange | null, knownSi
         Bucket: R2_BUCKET,
         Key: key,
         Range: `bytes=${requested.start}-${requested.end}`,
-      })
+      }),
     );
 
     const body = get.Body as
-      | { transformToWebStream?: () => ReadableStream<Uint8Array>; getReader?: () => ReadableStreamDefaultReader<Uint8Array> }
-      | undefined;
+      { transformToWebStream?: () => ReadableStream<Uint8Array>; getReader?: () => ReadableStreamDefaultReader<Uint8Array> } | undefined;
     if (!body) {
       throw new Error(`File not found: ${key}`);
     }
 
-    // AWS SDK v3 S3 Body exposes transformToWebStream(); fall back to a
-    // Node Readable → web stream adapter if the runtime lacks it.
+    // AWS SDK v3 S3 Body exposes transformToWebStream(); fall back to a Node Readable → web stream
+    // adapter if the runtime lacks it.
     interface NodeReadableLike {
       pipe?: unknown;
       on(event: "data", cb: (chunk: Uint8Array | Buffer) => void): void;
@@ -297,9 +257,7 @@ export async function streamFile(key: string, range: StreamRange | null, knownSi
       const nodeStream = get.Body as unknown as NodeReadableLike;
       stream = new ReadableStream({
         start(controller) {
-          nodeStream.on("data", (chunk: Uint8Array | Buffer) =>
-            controller.enqueue(new Uint8Array(chunk))
-          );
+          nodeStream.on("data", (chunk: Uint8Array | Buffer) => controller.enqueue(new Uint8Array(chunk)));
           nodeStream.on("end", () => controller.close());
           nodeStream.on("error", (err: unknown) => controller.error(err));
         },
@@ -330,19 +288,15 @@ export async function streamFile(key: string, range: StreamRange | null, knownSi
     const stat = await fs.stat(filePath);
     totalSize = stat.size;
   }
-  const requested = range
-    ? { start: range.start, end: Math.min(range.end, totalSize - 1) }
-    : { start: 0, end: totalSize - 1 };
+  const requested = range ? { start: range.start, end: Math.min(range.end, totalSize - 1) } : { start: 0, end: totalSize - 1 };
   const length = requested.end - requested.start + 1;
 
-  const nodeStream = await fs.open(filePath, "r").then((handle) =>
-    handle.createReadStream({ start: requested.start, end: requested.end })
-  );
+  const nodeStream = await fs.open(filePath, "r").then((handle) => handle.createReadStream({ start: requested.start, end: requested.end }));
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       nodeStream.on("data", (chunk: string | Buffer) =>
-        controller.enqueue(new Uint8Array(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)))
+        controller.enqueue(new Uint8Array(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))),
       );
       nodeStream.on("end", () => controller.close());
       nodeStream.on("error", (err: unknown) => controller.error(err));
@@ -364,7 +318,8 @@ export async function streamFile(key: string, range: StreamRange | null, knownSi
   };
 }
 
-export async function fileExists(key: string): Promise<boolean> {  if (!isSafeStorageKey(key)) return false;
+export async function fileExists(key: string): Promise<boolean> {
+  if (!isSafeStorageKey(key)) return false;
 
   if (s3Client && R2_BUCKET) {
     try {
@@ -372,7 +327,7 @@ export async function fileExists(key: string): Promise<boolean> {  if (!isSafeSt
         new HeadObjectCommand({
           Bucket: R2_BUCKET,
           Key: key,
-        })
+        }),
       );
       return true;
     } catch {

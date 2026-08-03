@@ -10,12 +10,7 @@ import { PronunciationEditor } from "./bookDetail/PronunciationEditor";
 import { useToast } from "./ui/Toast";
 import { useSSE } from "../hooks/useSSE";
 import { apiFetch, deleteBook, reportNetworkError } from "../lib/api";
-import type {
-  Book,
-  Chapter,
-  PipelineEvent,
-  BookDetailResponse,
-} from "../types/api";
+import type { Book, Chapter, PipelineEvent, BookDetailResponse } from "../types/api";
 
 interface BookDetailProps {
   bookId: string;
@@ -37,9 +32,7 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
   const [loadError, setLoadError] = useState(false);
 
   const [progressLog, setProgressLog] = useState<string[]>([]);
-  const [segmentCountInfo, setSegmentCountInfo] = useState<
-    Record<string, { total: number; done: number }>
-  >({});
+  const [segmentCountInfo, setSegmentCountInfo] = useState<Record<string, { total: number; done: number }>>({});
 
   const [newTerm, setNewTerm] = useState("");
   const [newHint, setNewHint] = useState("");
@@ -49,8 +42,8 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
 
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const [playingPreviewId, setPlayingPreviewId] = useState<string | null>(null);
-  /** Monotonic request counter — stale fetch responses are ignored so a slow
-   * older request can never overwrite fresher data (or an unmounted view). */
+  /** Monotonic request counter — stale fetch responses are ignored so a slow older request can't
+   * overwrite fresher data (or an unmounted view). */
   const fetchSeqRef = useRef(0);
 
   const fetchDetails = useCallback(async () => {
@@ -72,7 +65,7 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
           setSegmentCountInfo(body.segmentProgress);
         }
       } else if (res.status !== 401) {
-        // Server error (5xx etc.): show a retryable error, not "Book not found"
+        // Server error (5xx): show a retryable error, not "Book not found".
         setLoadError(true);
       }
     } catch (err) {
@@ -95,9 +88,7 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
       }
 
       if (payload.type === "status_change") {
-        setData((prev) =>
-          prev ? { ...prev, book: { ...prev.book, status: payload.status } } : prev
-        );
+        setData((prev) => (prev ? { ...prev, book: { ...prev.book, status: payload.status } } : prev));
         pushLog(payload.message ?? `System status: ${payload.status}`);
         void fetchDetails();
         return;
@@ -116,7 +107,7 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
                     durationMs: payload.durationMs ?? ch.durationMs,
                     audioR2Key: payload.audioR2Key ?? ch.audioR2Key,
                   }
-                : ch
+                : ch,
             ),
           };
         });
@@ -166,12 +157,12 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
         });
       }
     },
-    [pushLog, fetchDetails]
+    [pushLog, fetchDetails],
   );
 
-  // Ref-stable row callback: identity never changes across data refreshes, so
-  // memoized ChapterRows don't all re-render on every SSE event.
-  // (Must live with the other hooks, before the early returns below.)
+  // Ref-stable row callback: identity never changes across data refreshes, so memoized
+  // ChapterRows don't all re-render on every SSE event. Must live with the other hooks,
+  // before the early returns below.
   const dataRef = useRef<DetailData | null>(null);
   useEffect(() => {
     dataRef.current = data;
@@ -180,11 +171,10 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
     (ch: Chapter) => {
       const current = dataRef.current;
       if (!current) return;
-      const resumeMs =
-        current.playbackState?.chapterId === ch.id ? current.playbackState.positionMs : 0;
+      const resumeMs = current.playbackState?.chapterId === ch.id ? current.playbackState.positionMs : 0;
       onPlayChapter(current.book, ch, resumeMs);
     },
-    [onPlayChapter]
+    [onPlayChapter],
   );
 
   useEffect(() => {
@@ -194,9 +184,8 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
   useSSE(`/api/books/${bookId}/events`, {
     onEvent: handlePipelineEvent,
     onError: () => console.warn("SSE connection interrupted. Reconnecting…"),
-    // Events emitted during the reconnect gap were missed — this view is
-    // SSE-only (no polling fallback), so refetch or chapter rows stay stale
-    // indefinitely until an unrelated event happens to arrive.
+    // Events emitted during the reconnect gap were missed — this view is SSE-only (no polling
+    // fallback), so refetch or chapter rows stay stale until an unrelated event happens to arrive.
     onReconnect: () => void fetchDetails(),
   });
 
@@ -287,9 +276,7 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
     return (
       <div className="max-w-4xl mx-auto px-5 sm:px-6 py-20 text-center">
         <h1 className="font-serif text-3xl font-medium mb-3 text-gradient">Couldn’t load this book</h1>
-        <p className="text-cinema-400 text-sm mb-8">
-          The server hit an error. This is usually temporary — try again.
-        </p>
+        <p className="text-cinema-400 text-sm mb-8">The server hit an error. This is usually temporary — try again.</p>
         <div className="flex justify-center gap-3">
           <Button variant="secondary" onClick={onBack}>
             <Icon name="chevronLeft" size={16} />
@@ -315,9 +302,7 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
     return (
       <div className="max-w-4xl mx-auto px-5 sm:px-6 py-20 text-center">
         <h1 className="font-serif text-3xl font-medium mb-3 text-gradient">Book not found</h1>
-        <p className="text-cinema-400 text-sm mb-8">
-          This book may have been removed or the link is invalid.
-        </p>
+        <p className="text-cinema-400 text-sm mb-8">This book may have been removed or the link is invalid.</p>
         <Button variant="secondary" onClick={onBack}>
           <Icon name="chevronLeft" size={16} />
           Back to Library
@@ -327,13 +312,11 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
   }
 
   const book = data.book;
-  // Single-narrator system: exactly one "cast" row exists per book (the
-  // Narrator inserted at ingestion). Older books may still carry several
-  // character rows; we surface only the narrator, else fall back to the
-  // first row so previews keep working for legacy libraries.
+  // Single-narrator system: exactly one "cast" row exists per book (the Narrator inserted at
+  // ingestion). Older books may carry several character rows; surface only the narrator, else
+  // fall back to the first row so previews keep working for legacy libraries.
   const castList = data.cast ?? [];
-  const narrator =
-    castList.find((c) => c.name.toLowerCase() === "narrator") ?? castList[0] ?? null;
+  const narrator = castList.find((c) => c.name.toLowerCase() === "narrator") ?? castList[0] ?? null;
   const chaptersList = data.chapters ?? [];
   const pronList = data.pronunciation ?? [];
   const isWorking = book.status !== "ready" && book.status !== "failed";
@@ -389,16 +372,10 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
 
         <div className="cover-frame relative w-44 shrink-0 aspect-[2/3] rounded-2xl overflow-hidden shadow-cover ring-1 ring-white/10 self-center sm:self-start">
           {book.coverR2Key ? (
-            <img
-              src={`/api/audio?key=${encodeURIComponent(book.coverR2Key)}`}
-              alt={book.title}
-              className="w-full h-full object-cover"
-            />
+            <img src={`/api/audio?key=${encodeURIComponent(book.coverR2Key)}`} alt={book.title} className="w-full h-full object-cover" />
           ) : (
             <div className="w-full h-full bg-gradient-to-br from-cinema-800 via-cinema-900 to-cinema-950 p-5 flex flex-col justify-between text-center">
-              <div className="text-[9px] uppercase tracking-[0.28em] font-medium text-gold-400/80">
-                Narratea
-              </div>
+              <div className="text-[9px] uppercase tracking-[0.28em] font-medium text-gold-400/80">Narratea</div>
               <div className="font-serif text-sm font-medium line-clamp-4 leading-snug">{book.title}</div>
               <div className="text-[10px] text-cinema-400 italic font-serif">{book.author}</div>
             </div>
@@ -414,10 +391,7 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
           </div>
 
           <div className="flex justify-center sm:justify-start items-center gap-3 flex-wrap">
-            <Badge
-              tone={book.status === "ready" ? "emerald" : book.status === "failed" ? "red" : "gold"}
-              pulse={isWorking}
-            >
+            <Badge tone={book.status === "ready" ? "emerald" : book.status === "failed" ? "red" : "gold"} pulse={isWorking}>
               {book.status}
             </Badge>
             <span className="text-[11px] text-cinema-500 tracking-wide">
@@ -474,15 +448,10 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
           </h3>
           <div className="font-mono text-[11px] text-cinema-400 max-h-28 overflow-y-auto space-y-1.5 pr-2">
             {progressLog.length === 0 ? (
-              // A just-added book is enqueued before this view (and its SSE
-              // stream) opens, so the first progress events can be missed and
-              // the console would otherwise sit on a dead "Waiting for cues…"
-              // while ingestion is already running. Derive a status-based line
-              // instead of waiting for the next event to arrive.
+              // A just-added book is enqueued before this view (and its SSE stream) opens, so the
+              // first progress events can be missed — derive a status-based line instead of waiting.
               <p className="italic text-cinema-600">
-                {book.status === "discovering"
-                  ? "Starting up — acquisition and parsing updates land here shortly…"
-                  : "Waiting for cues…"}
+                {book.status === "discovering" ? "Starting up — acquisition and parsing updates land here shortly…" : "Waiting for cues…"}
               </p>
             ) : (
               progressLog.map((log, index) => {
@@ -491,13 +460,7 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
                 return (
                   <div key={index} className="flex gap-2">
                     <span className="text-gold-600/80 select-none">›</span>
-                    <span
-                      className={
-                        isError ? "text-red-300" : isWarning ? "text-amber-300" : undefined
-                      }
-                    >
-                      {log}
-                    </span>
+                    <span className={isError ? "text-red-300" : isWarning ? "text-amber-300" : undefined}>{log}</span>
                   </div>
                 );
               })
@@ -506,13 +469,7 @@ export default function BookDetail({ bookId, onBack, onPlayChapter, activeChapte
         </Card>
       )}
 
-      {narrator && (
-        <NarratorCard
-          narrator={narrator}
-          playingPreviewId={playingPreviewId}
-          onPlayPreview={handlePlayPreview}
-        />
-      )}
+      {narrator && <NarratorCard narrator={narrator} playingPreviewId={playingPreviewId} onPlayPreview={handlePlayPreview} />}
 
       <section className="mb-14">
         <div className="flex items-baseline justify-between pb-4 mb-5 border-b border-white/[0.05]">

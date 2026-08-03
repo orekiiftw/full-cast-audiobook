@@ -12,25 +12,20 @@ function torboxApiKey(): string | undefined {
 }
 const MAX_TORRENT_BYTES = TORRENT.MAX_FILE_SIZE_BYTES;
 
-/** No fetch may hang forever: a stalled socket used to park an ingestion
- *  worker until BullMQ stall-recovery re-ran the job (duplicating paid
- *  createtorrent calls). */
+/** No fetch may hang forever: a stalled socket used to park an ingestion worker until BullMQ
+    stall-recovery re-ran the job (duplicating paid createtorrent calls). */
 const API_TIMEOUT_MS = 30_000;
 const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
-/** Third-party/search response bodies are read with a hard cap so a huge or
- *  malicious payload can't be fully buffered by res.json(). */
+/** Third-party/search response bodies are read with a hard cap so a huge or malicious payload
+    can't be fully buffered by res.json(). */
 const JSON_RESPONSE_CAP = 32 * 1024 * 1024;
 const ERROR_TEXT_CAP = 64 * 1024;
 
-/**
- * Short-TTL DNS cache for TorBox CDN hosts. Narrows the time-of-check/
- * time-of-use window between assertSafeDownloadUrlDns's resolution and the
- * subsequent fetch(): within the TTL the resolved address is reused, so a
- * DNS-rebinding attack must change the record between two separate resolver
- * queries within the cache window. The primary TOCTOU defense for HTTPS
- * remains TLS certificate validation (fetch rejects a cert that doesn't
- * match the TorBox CDN hostname, which an internal IP can't present).
- */
+/** Short-TTL DNS cache for TorBox CDN hosts. Narrows the TOCTOU window between
+    assertSafeDownloadUrlDns's resolution and the subsequent fetch(): within the TTL the resolved
+    address is reused, so a DNS-rebinding attack must change the record between two resolver
+    queries within the cache window. The primary TOCTOU defense for HTTPS remains TLS cert
+    validation (fetch rejects a cert that doesn't match the TorBox CDN hostname). */
 const DNS_CACHE_TTL_MS = 30_000;
 const dnsCache = new Map<string, { addresses: { address: string; family: number }[]; expiresAt: number }>();
 
@@ -43,12 +38,13 @@ async function resolveHostCached(host: string): Promise<{ address: string; famil
   return addresses;
 }
 
-/** Reads a response body as text, capped, so a runaway third-party payload
- *  cannot be materialized in memory (the byte cap also bounds time). */
+/** Reads a response body as text, capped, so a runaway third-party payload cannot be materialized. */
 async function readBodyText(response: Response, cap: number, what: string): Promise<string> {
   if (!response.body) throw new Error(`${what}: empty response body.`);
-  const buffer = await readStreamWithCap(response.body, cap, () =>
-    new Error(`${what} response exceeded the ${Math.round(cap / (1024 * 1024))}MB size limit.`)
+  const buffer = await readStreamWithCap(
+    response.body,
+    cap,
+    () => new Error(`${what} response exceeded the ${Math.round(cap / (1024 * 1024))}MB size limit.`),
   );
   return buffer.toString("utf-8");
 }
@@ -62,11 +58,23 @@ async function readJson<T>(response: Response, what: string): Promise<T> {
   }
 }
 
-interface TorrentHit { name: string; hash: string; size: number; seeds: number; source: string; }
+interface TorrentHit {
+  name: string;
+  hash: string;
+  size: number;
+  seeds: number;
+  source: string;
+}
 
 /** Builds a bounded sequence from precise to resilient public-index queries. */
 export function buildTorrentSearchQueries(title: string, author: string): string[] {
-  const clean = (value: string) => value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  const clean = (value: string) =>
+    value
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-zA-Z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
   const cleanTitle = clean(title);
   const authorWords = clean(author).split(" ").filter(Boolean);
   const surname = authorWords.at(-1) ?? "";
@@ -77,7 +85,9 @@ export function buildTorrentSearchQueries(title: string, author: string): string
     `${cleanTitle} epub`,
     `${keywords.slice(0, 5).join(" ")} ${surname} epub`,
     `${keywords.slice(0, 2).join(" ")} epub`,
-  ].map((q) => q.replace(/\s+/g, " ").trim()).filter((q) => q !== "epub");
+  ]
+    .map((q) => q.replace(/\s+/g, " ").trim())
+    .filter((q) => q !== "epub");
   return [...new Set(variants)].slice(0, 5);
 }
 
@@ -85,7 +95,9 @@ export function buildTorrentSearchQueries(title: string, author: string): string
 export async function searchBookTorrent(title: string, author: string): Promise<string> {
   const queries = buildTorrentSearchQueries(title, author);
   if (!queries.length) throw new Error("A book title is required for torrent search.");
-  console.log(`🔍 Searching torrents using ${queries.length} query variant(s): ${queries.map((query) => JSON.stringify(query)).join(", ")}`);
+  console.log(
+    `🔍 Searching torrents using ${queries.length} query variant(s): ${queries.map((query) => JSON.stringify(query)).join(", ")}`,
+  );
   const errors: string[] = [];
   const providers: Array<{ name: string; run: () => Promise<TorrentHit[]> }> = [
     { name: "torbox", run: () => searchTorBox(queries[0]) },
@@ -96,8 +108,8 @@ export async function searchBookTorrent(title: string, author: string): Promise<
     try {
       const best = pickBestEpubTorrent(await provider.run(), title, author);
       if (best) {
-        // best.name is third-party data — strip control chars so a crafted
-        // torrent name can't forge log lines (\n) or smuggle terminal escapes.
+        // best.name is third-party data — strip control chars so a crafted name can't forge log
+        // lines (\n) or smuggle terminal escapes.
         const logSafeName = best.name.replace(/[\x00-\x1f\x7f]/g, " ");
         console.log(`✅ Selected via ${best.source}: "${logSafeName}" (${(best.size / (1024 * 1024)).toFixed(2)} MB, ${best.seeds} seeds)`);
         return `magnet:?xt=urn:btih:${best.hash}&dn=${encodeURIComponent(best.name)}`;
@@ -112,12 +124,9 @@ export async function searchBookTorrent(title: string, author: string): Promise<
   throw new Error(`Could not find torrent. ${errors.join(" | ")}`);
 }
 
-/**
- * Single bounded retry delay for rate-limited / 5xx TorBox search responses.
- * Everything else (network failure, timeout, empty results, zero quota) fails
- * straight through to the fallback indexers — the old 4s + 8s backoff stalled
- * every book search ~12s before the fallbacks behind TorBox even ran.
- */
+/** Single bounded retry for rate-limited / 5xx TorBox responses. Everything else (network failure,
+    timeout, empty results, zero quota) fails straight through to the fallback indexers — the old
+    4s + 8s backoff stalled every search ~12s before the fallbacks even ran. */
 const SEARCH_RETRY_DELAY_MS = 750;
 
 async function searchTorBox(query: string): Promise<TorrentHit[]> {
@@ -132,8 +141,7 @@ async function searchTorBox(query: string): Promise<TorrentHit[]> {
         signal: AbortSignal.timeout(API_TIMEOUT_MS),
       });
     } catch (err) {
-      // DNS/connect/timeout: won't heal within this search session — hand off
-      // to the fallback indexers immediately instead of sleeping through retries.
+      // DNS/connect/timeout won't heal within this search session — hand off to fallbacks immediately.
       throw err instanceof Error ? err : new Error(String(err));
     }
     if (res.status === 429) {
@@ -147,10 +155,16 @@ async function searchTorBox(query: string): Promise<TorrentHit[]> {
     } else {
       const json = await readJson<{ data?: unknown; torrents?: unknown; error?: string }>(res, "TorBox search");
       const rows = normalizeList(json.data ?? json.torrents);
-      // No results is a definitive answer for this query, not a transient
-      // failure — retrying the identical query just stalls the fallbacks.
+      // No results is a definitive answer, not a transient failure — retrying the identical query
+      // just stalls the fallbacks.
       if (!rows.length) throw new Error(json.error || "No results returned");
-      return rows.map((item) => ({ name: str(item, ["name", "titleFull", "title"]) || "Unknown", hash: cleanHash(str(item, ["hash", "info_hash", "infohash"])), size: num(item, ["size", "size_bytes", "filesize"]), seeds: num(item, ["seeds", "seeders", "seed"]), source: "torbox" }));
+      return rows.map((item) => ({
+        name: str(item, ["name", "titleFull", "title"]) || "Unknown",
+        hash: cleanHash(str(item, ["hash", "info_hash", "infohash"])),
+        size: num(item, ["size", "size_bytes", "filesize"]),
+        seeds: num(item, ["seeds", "seeders", "seed"]),
+        source: "torbox",
+      }));
     }
     if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, SEARCH_RETRY_DELAY_MS));
   }
@@ -170,9 +184,17 @@ async function searchApibay(queries: string[]): Promise<TorrentHit[]> {
       if (!Array.isArray(data)) continue;
       for (const item of data as Record<string, unknown>[]) {
         if (String(item.id) === "0" || /no results/i.test(String(item.name ?? ""))) continue;
-        hits.push({ name: String(item.name ?? "Unknown"), hash: cleanHash(String(item.info_hash ?? "")), size: Number(item.size) || 0, seeds: Number(item.seeders) || 0, source: "apibay" });
+        hits.push({
+          name: String(item.name ?? "Unknown"),
+          hash: cleanHash(String(item.info_hash ?? "")),
+          size: Number(item.size) || 0,
+          seeds: Number(item.seeders) || 0,
+          source: "apibay",
+        });
       }
-    } catch { /* continue with the next variant */ }
+    } catch {
+      /* continue with the next variant */
+    }
   }
   return uniqueHits(hits);
 }
@@ -187,39 +209,101 @@ async function searchTorrentsCsv(queries: string[]): Promise<TorrentHit[]> {
       });
       if (!res.ok) continue;
       const json = await readJson<{ torrents?: Record<string, unknown>[] }>(res, "torrents-csv");
-      for (const item of Array.isArray(json.torrents) ? json.torrents : []) hits.push({ name: String(item.name ?? "Unknown"), hash: cleanHash(String(item.infohash ?? item.info_hash ?? "")), size: Number(item.size_bytes ?? item.size) || 0, seeds: Number(item.seeders ?? item.seeds) || 0, source: "torrents-csv" });
-    } catch { /* continue with the next variant */ }
+      for (const item of Array.isArray(json.torrents) ? json.torrents : []) {
+        hits.push({
+          name: String(item.name ?? "Unknown"),
+          hash: cleanHash(String(item.infohash ?? item.info_hash ?? "")),
+          size: Number(item.size_bytes ?? item.size) || 0,
+          seeds: Number(item.seeders ?? item.seeds) || 0,
+          source: "torrents-csv",
+        });
+      }
+    } catch {
+      /* continue with the next variant */
+    }
   }
   return uniqueHits(hits);
 }
 
-function uniqueHits(hits: TorrentHit[]): TorrentHit[] { const seen = new Set<string>(); return hits.filter((hit) => !!hit.hash && !seen.has(hit.hash) && (seen.add(hit.hash), true)); }
+function uniqueHits(hits: TorrentHit[]): TorrentHit[] {
+  const seen = new Set<string>();
+  return hits.filter((hit) => !!hit.hash && !seen.has(hit.hash) && (seen.add(hit.hash), true));
+}
+
 function pickBestEpubTorrent(hits: TorrentHit[], title: string, author: string): TorrentHit | null {
-  const titleTokens = tokenize(title); const authorTokens = tokenize(author);
-  // Gate on whatever can be verified. A title whose tokens all collapse to
-  // nothing (words ≤ 2 chars, e.g. "It") must still match an author token —
-  // otherwise the gate was vacuous and any high-seed EPUB won the pick. For a
-  // real title, require every meaningful title token: matching only a generic
-  // word (e.g. "Lord") can otherwise select a completely unrelated book.
-  const scored = hits.filter((t) => t.hash.length >= 32 && (t.size <= 0 || t.size <= MAX_TORRENT_BYTES)).map((t) => {
-    const name = t.name.toLowerCase();
-    const nameTokens = tokenize(t.name);
-    const matchesQuery = titleTokens.length > 0
-      ? titleTokens.every((token) => nameTokens.includes(token))
-      : authorTokens.some((token) => nameTokens.includes(token));
-    let score = 0;
-    if (/\.epub\b|\bepub\b/i.test(name)) score += 50; if (/\.pdf\b/i.test(name)) score -= 20; if (/\.mobi\b|\.azw/i.test(name)) score -= 5; if (/\baudiobook\b|\bmp3\b|\bm4b\b/i.test(name)) score -= 40;
-    for (const token of titleTokens) if (name.includes(token)) score += 8; for (const token of authorTokens) if (name.includes(token)) score += 4;
-    score += Math.min(t.seeds, 50); if (t.size > 0 && t.size < 20 * 1024 * 1024) score += 10; if (t.size > 50 * 1024 * 1024) score -= 10;
-    return { t, score, matchesQuery };
-  }).filter(({ t, score, matchesQuery }) => /\bepub\b|\.epub\b/i.test(t.name) && matchesQuery && score > 0).sort((a, b) => b.score - a.score || b.t.seeds - a.t.seeds);
+  const titleTokens = tokenize(title);
+  const authorTokens = tokenize(author);
+  // Gate on whatever can be verified. A title whose tokens all collapse to nothing (words ≤ 2 chars,
+  // e.g. "It") must still match an author token — otherwise the gate was vacuous and any high-seed
+  // EPUB won the pick. For a real title, require every meaningful title token: matching only a
+  // generic word (e.g. "Lord") can otherwise select a completely unrelated book.
+  const scored = hits
+    .filter((t) => t.hash.length >= 32 && (t.size <= 0 || t.size <= MAX_TORRENT_BYTES))
+    .map((t) => {
+      const name = t.name.toLowerCase();
+      const nameTokens = tokenize(t.name);
+      const matchesQuery =
+        titleTokens.length > 0
+          ? titleTokens.every((token) => nameTokens.includes(token))
+          : authorTokens.some((token) => nameTokens.includes(token));
+      let score = 0;
+      if (/\.epub\b|\bepub\b/i.test(name)) score += 50;
+      if (/\.pdf\b/i.test(name)) score -= 20;
+      if (/\.mobi\b|\.azw/i.test(name)) score -= 5;
+      if (/\baudiobook\b|\bmp3\b|\bm4b\b/i.test(name)) score -= 40;
+      for (const token of titleTokens) if (name.includes(token)) score += 8;
+      for (const token of authorTokens) if (name.includes(token)) score += 4;
+      score += Math.min(t.seeds, 50);
+      if (t.size > 0 && t.size < 20 * 1024 * 1024) score += 10;
+      if (t.size > 50 * 1024 * 1024) score -= 10;
+      return { t, score, matchesQuery };
+    })
+    .filter(({ t, score, matchesQuery }) => /\bepub\b|\.epub\b/i.test(t.name) && matchesQuery && score > 0)
+    .sort((a, b) => b.score - a.score || b.t.seeds - a.t.seeds);
   return scored[0]?.t ?? null;
 }
-function tokenize(value: string): string[] { return value.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((word) => word.length > 2 && !["the", "and", "for"].includes(word)); }
-function cleanHash(hash: string): string { return hash.replace(/^urn:btih:/i, "").replace(/[^a-fA-F0-9]/g, "").toLowerCase(); }
-function normalizeList(data: unknown): Record<string, unknown>[] { if (Array.isArray(data)) return data as Record<string, unknown>[]; if (data && typeof data === "object") { const object = data as Record<string, unknown>; if (Array.isArray(object.torrents)) return object.torrents as Record<string, unknown>[]; if (Array.isArray(object.results)) return object.results as Record<string, unknown>[]; } return []; }
-function str(item: Record<string, unknown>, keys: string[]): string { for (const key of keys) { const value = item[key]; if (typeof value === "string" && value.trim()) return value.trim(); } return ""; }
-function num(item: Record<string, unknown>, keys: string[]): number { for (const key of keys) { const value = item[key]; const number = typeof value === "number" ? value : Number(value); if (!Number.isNaN(number) && number >= 0) return number; } return 0; }
+
+function tokenize(value: string): string[] {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 2 && !["the", "and", "for"].includes(word));
+}
+
+function cleanHash(hash: string): string {
+  return hash
+    .replace(/^urn:btih:/i, "")
+    .replace(/[^a-fA-F0-9]/g, "")
+    .toLowerCase();
+}
+
+function normalizeList(data: unknown): Record<string, unknown>[] {
+  if (Array.isArray(data)) return data as Record<string, unknown>[];
+  if (data && typeof data === "object") {
+    const object = data as Record<string, unknown>;
+    if (Array.isArray(object.torrents)) return object.torrents as Record<string, unknown>[];
+    if (Array.isArray(object.results)) return object.results as Record<string, unknown>[];
+  }
+  return [];
+}
+
+function str(item: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = item[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function num(item: Record<string, unknown>, keys: string[]): number {
+  for (const key of keys) {
+    const value = item[key];
+    const number = typeof value === "number" ? value : Number(value);
+    if (!Number.isNaN(number) && number >= 0) return number;
+  }
+  return 0;
+}
 
 /** Checks if a torrent hash is already cached in TorBox */
 export async function isTorrentCached(hash: string): Promise<boolean> {
@@ -234,11 +318,16 @@ export async function isTorrentCached(hash: string): Promise<boolean> {
     if (!res.ok) return false;
     const json = await readJson<{ success?: boolean; data?: Record<string, { cached?: boolean }> }>(res, "TorBox checkcached");
     return !!(json.success && json.data && json.data[clean]?.cached);
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 /** Downloads an EPUB through TorBox, enforcing a streamed 200MB limit. */
-export async function downloadBookFromTorrent(magnetOrHash: string, onProgress?: (message: string) => void): Promise<{ buffer: Buffer; filename: string }> {
+export async function downloadBookFromTorrent(
+  magnetOrHash: string,
+  onProgress?: (message: string) => void,
+): Promise<{ buffer: Buffer; filename: string }> {
   const apiKey = torboxApiKey();
   if (!apiKey) throw new Error("TorBox API Key is not configured in .env file.");
   let magnet = magnetOrHash;
@@ -247,20 +336,30 @@ export async function downloadBookFromTorrent(magnetOrHash: string, onProgress?:
   const cached = await isTorrentCached(magnet);
   console.log(`TorBox cache state: ${cached ? "CACHED" : "UNCACHED"}`);
   onProgress?.("Adding torrent to TorBox...");
-  const form = new FormData(); form.append("magnet", magnet); form.append("seed", "3");
+  const form = new FormData();
+  form.append("magnet", magnet);
+  form.append("seed", "3");
   const createRes = await fetch(`${MAIN_API_URL}/torrents/createtorrent`, {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
     signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
-  if (!createRes.ok) throw new Error(`TorBox failed to add torrent: ${errorResText(await readBodyText(createRes, ERROR_TEXT_CAP, "TorBox add torrent"))}`);
+  if (!createRes.ok)
+    throw new Error(`TorBox failed to add torrent: ${errorResText(await readBodyText(createRes, ERROR_TEXT_CAP, "TorBox add torrent"))}`);
   const created = await readJson<{ success?: boolean; data?: { torrent_id?: number }; detail?: string }>(createRes, "TorBox add torrent");
   const torrentId = created.data?.torrent_id;
   if (!created.success || torrentId == null) throw new Error(`TorBox create failed: ${created.detail || "Unknown error"}`);
   onProgress?.("Waiting for torrent to download...");
   type FileRow = { id?: number; name?: string; short_name?: string; size?: number };
-  type TorrentRow = { progress?: number; status?: string; download_state?: string; download_finished?: boolean; download_present?: boolean; files?: FileRow[] };
+  type TorrentRow = {
+    progress?: number;
+    status?: string;
+    download_state?: string;
+    download_finished?: boolean;
+    download_present?: boolean;
+    files?: FileRow[];
+  };
   let torrent: TorrentRow | null = null;
   for (let poll = 0; poll < TORRENT.MAX_POLLS; poll++) {
     try {
@@ -270,16 +369,22 @@ export async function downloadBookFromTorrent(magnetOrHash: string, onProgress?:
       });
       if (result.ok) {
         const json = await readJson<{ data?: TorrentRow | TorrentRow[] }>(result, "TorBox mylist");
-        torrent = Array.isArray(json.data) ? json.data[0] ?? null : json.data ?? null;
+        torrent = Array.isArray(json.data) ? (json.data[0] ?? null) : (json.data ?? null);
         const state = torrent?.download_state || torrent?.status || "";
-        const ready = !!torrent && (torrent.download_finished || torrent.download_present || state === "cached" || state === "completed" || (torrent.progress ?? 0) >= 1);
+        const ready =
+          !!torrent &&
+          (torrent.download_finished ||
+            torrent.download_present ||
+            state === "cached" ||
+            state === "completed" ||
+            (torrent.progress ?? 0) >= 1);
         if (ready) break;
         if (state === "failed" || state === "error") break; // handled below
         onProgress?.(`Downloading torrent: ${((torrent?.progress ?? 0) * 100).toFixed(1)}% (${state})`);
       }
     } catch (err) {
-      // A transient poll failure (timeout/parse hiccup) must not kill the whole
-      // download — keep polling within the bounded window.
+      // A transient poll failure (timeout/parse hiccup) must not kill the whole download — keep
+      // polling within the bounded window.
       console.warn("⚠️ TorBox mylist poll failed:", err);
     }
     await new Promise((resolve) => setTimeout(resolve, TORRENT.POLL_INTERVAL_MS));
@@ -288,67 +393,96 @@ export async function downloadBookFromTorrent(magnetOrHash: string, onProgress?:
   if (state === "failed" || state === "error") {
     throw new Error("Torrent download failed on TorBox server.");
   }
-  const ready = !!torrent && (torrent.download_finished || torrent.download_present || torrent.download_state === "cached" || torrent.download_state === "completed" || torrent.status === "completed" || (torrent.progress ?? 0) >= 1);
+  const ready =
+    !!torrent &&
+    (torrent.download_finished ||
+      torrent.download_present ||
+      torrent.download_state === "cached" ||
+      torrent.download_state === "completed" ||
+      torrent.status === "completed" ||
+      (torrent.progress ?? 0) >= 1);
   if (!ready || !torrent) throw new Error("Timeout waiting for torrent to download on TorBox.");
   const label = (file: FileRow) => `${file.short_name || ""} ${file.name || ""}`.toLowerCase();
-  // Prefer an exact .epub file (not "book.epub.txt", not a sample) so a
-  // multi-book bundle or a torrent with sample chapters picks the book itself.
+  // Prefer an exact .epub file (not "book.epub.txt", not a sample) so a multi-book bundle or a
+  // torrent with sample chapters picks the book itself.
   const isExactEpub = (file: FileRow) => {
     const l = label(file);
     return l.includes(".epub") && !l.includes(".epub.") && !/sample/i.test(l);
   };
   const target = (torrent.files ?? []).find(isExactEpub) ?? (torrent.files ?? []).find((file) => label(file).includes(".epub"));
-  if (target?.id == null) { const hasPdf = (torrent.files ?? []).some((file) => label(file).includes(".pdf")); throw new Error(hasPdf ? "Torrent contains only PDF files. Only EPUB ebooks are supported." : "No EPUB files found inside the torrent archive."); }
+  if (target?.id == null) {
+    const hasPdf = (torrent.files ?? []).some((file) => label(file).includes(".pdf"));
+    throw new Error(
+      hasPdf ? "Torrent contains only PDF files. Only EPUB ebooks are supported." : "No EPUB files found inside the torrent archive.",
+    );
+  }
   if ((target.size ?? 0) > MAX_TORRENT_BYTES) throw new Error("The target book file exceeds the 200MB size limit.");
   const filename = target.short_name || target.name || "book.epub";
   onProgress?.(`Requesting download link for: ${filename}...`);
-  // TorBox's requestdl endpoint rejects header-only auth with a 422
-  // ("query.token: field required") — unlike the other endpoints, it demands
-  // the API token as a query parameter. The CDN URL it returns already
-  // embeds a one-time token in its own query string, so query-string
-  // credentials are inherent to this provider's design. Never log this URL.
-  const linkResponse = await fetch(`${MAIN_API_URL}/torrents/requestdl?torrent_id=${torrentId}&file_id=${target.id}&zip_link=false&token=${encodeURIComponent(apiKey)}`, {
-    headers: { Authorization: `Bearer ${apiKey}` },
-    signal: AbortSignal.timeout(API_TIMEOUT_MS),
-  });
-  if (!linkResponse.ok) throw new Error(`Failed to request download link (${linkResponse.status}): ${errorResText(await readBodyText(linkResponse, ERROR_TEXT_CAP, "TorBox requestdl")) || linkResponse.statusText}`);
-  const linkJson = await readJson<{ success?: boolean; data?: string | { url?: string }; detail?: string }>(linkResponse, "TorBox requestdl");
+  // TorBox's requestdl endpoint rejects header-only auth with a 422 ("query.token: field required") —
+  // unlike the other endpoints, it demands the API token as a query parameter. The CDN URL it returns
+  // already embeds a one-time token in its own query string, so query-string credentials are inherent
+  // to this provider's design. Never log this URL.
+  const linkResponse = await fetch(
+    `${MAIN_API_URL}/torrents/requestdl?torrent_id=${torrentId}&file_id=${target.id}&zip_link=false&token=${encodeURIComponent(apiKey)}`,
+    {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(API_TIMEOUT_MS),
+    },
+  );
+  if (!linkResponse.ok)
+    throw new Error(
+      `Failed to request download link (${linkResponse.status}): ${errorResText(await readBodyText(linkResponse, ERROR_TEXT_CAP, "TorBox requestdl")) || linkResponse.statusText}`,
+    );
+  const linkJson = await readJson<{ success?: boolean; data?: string | { url?: string }; detail?: string }>(
+    linkResponse,
+    "TorBox requestdl",
+  );
   const downloadUrl = typeof linkJson.data === "string" ? linkJson.data : linkJson.data?.url;
   if (!linkJson.success || !downloadUrl) throw new Error(`Download request failed: ${linkJson.detail || "Unknown error"}`);
   const safeDownloadUrl = await assertSafeDownloadUrlDns(downloadUrl);
-  // Follow redirects MANUALLY, re-running the SSRF guard on every hop. A CDN
-  // link can legitimately 3xx to an edge node, but fetch's default "follow"
-  // mode would fetch an unchecked redirect target — a compromised/malicious
-  // link could bounce us to an internal host (blind SSRF).
+  // Follow redirects MANUALLY, re-running the SSRF guard on every hop. A CDN link can legitimately 3xx
+  // to an edge node, but fetch's default "follow" mode would fetch an unchecked redirect target — a
+  // compromised/malicious link could bounce us to an internal host (blind SSRF).
   const fileResponse = await fetchWithValidatedRedirects(safeDownloadUrl);
   if (!fileResponse.ok) throw new Error(`Failed to download file from CDN: ${fileResponse.statusText}`);
-  if (Number(fileResponse.headers.get("content-length") ?? 0) > MAX_TORRENT_BYTES) throw new Error("The target book file exceeds the 200MB size limit.");
+  if (Number(fileResponse.headers.get("content-length") ?? 0) > MAX_TORRENT_BYTES)
+    throw new Error("The target book file exceeds the 200MB size limit.");
   const buffer = await readBodyWithCap(fileResponse, MAX_TORRENT_BYTES);
   verifyBookBuffer(buffer, filename);
   return { buffer, filename };
 }
-async function readBodyWithCap(response: Response, cap: number): Promise<Buffer> { if (!response.body) throw new Error("Empty response body from CDN."); return readStreamWithCap(response.body, cap, () => new Error("The downloaded file exceeds the 200MB size limit.")); }
-function verifyBookBuffer(buffer: Buffer, filename: string) { const isPdf = filename.toLowerCase().endsWith(".pdf") || buffer.toString("binary", 0, 4) === "%PDF"; if (isPdf) throw new Error("PDF format detected. Only EPUB ebooks are supported to guarantee high-quality layout and multi-voice generation."); if (!isZipBuffer(buffer)) throw new Error("The file is corrupted or is not a valid EPUB zip archive."); }
+
+async function readBodyWithCap(response: Response, cap: number): Promise<Buffer> {
+  if (!response.body) throw new Error("Empty response body from CDN.");
+  return readStreamWithCap(response.body, cap, () => new Error("The downloaded file exceeds the 200MB size limit."));
+}
+
+function verifyBookBuffer(buffer: Buffer, filename: string) {
+  const isPdf = filename.toLowerCase().endsWith(".pdf") || buffer.toString("binary", 0, 4) === "%PDF";
+  if (isPdf)
+    throw new Error("PDF format detected. Only EPUB ebooks are supported to guarantee high-quality layout and multi-voice generation.");
+  if (!isZipBuffer(buffer)) throw new Error("The file is corrupted or is not a valid EPUB zip archive.");
+}
+
 function errorResText(text: string): string {
   try {
     const parsed = JSON.parse(text) as { detail?: unknown; error?: unknown };
     const detail = parsed.detail ?? parsed.error;
     if (typeof detail === "string") return detail;
-    // FastAPI validation errors put an array of objects in `detail` —
-    // stringify so logs show the actual cause instead of "[object Object]".
+    // FastAPI validation errors put an array of objects in `detail` — stringify so logs show the cause.
     if (detail != null) return JSON.stringify(detail);
     return text;
-  } catch { return text; }
+  } catch {
+    return text;
+  }
 }
 
-/**
- * Guards the server-side fetch of a TorBox-returned download URL against SSRF:
- * the URL comes from a third-party API influenced by the user's magnet/hash,
- * so a rogue/compromised TorBox could point us at an internal host. Require
- * HTTPS and a torbox-owned hostname, and reject private/loopback/link-local
- * addresses even if DNS resolves them. The token still rides in the original
- * TorBox request, so no credential is sent to the validated URL.
- */
+/** Guards the server-side fetch of a TorBox download URL against SSRF: the URL comes from a third-party
+    API influenced by the user's magnet/hash, so a rogue/compromised TorBox could point us at an internal
+    host. Require HTTPS and a torbox-owned hostname, and reject private/loopback/link-local addresses
+    even if DNS resolves them. The token still rides in the original TorBox request, so no credential is
+    sent to the validated URL. */
 export function assertSafeDownloadUrl(raw: string): string {
   let url: URL;
   try {
@@ -360,34 +494,31 @@ export function assertSafeDownloadUrl(raw: string): string {
     throw new Error("TorBox returned a non-HTTPS download URL.");
   }
   const host = url.hostname.toLowerCase();
-  // TorBox serves files from its own CDNs: historically *.torbox.app, then
-  // *.tb-cdn.pw (e.g. https://nexus-008.indi.tb-cdn.pw/dld/...), and now
-  // *.tb-cdn.io (e.g. https://store-079.wnam.tb-cdn.io/dld/...). All are
-  // returned by the authenticated requestdl endpoint; reject anything else.
+  // TorBox serves files from its own CDNs: historically *.torbox.app, then *.tb-cdn.pw, and now
+  // *.tb-cdn.io. All are returned by the authenticated requestdl endpoint; reject anything else.
   const isTorBoxHost = (h: string) =>
-    h === "torbox.app" || h.endsWith(".torbox.app") ||
-    h === "tb-cdn.pw" || h.endsWith(".tb-cdn.pw") ||
-    h === "tb-cdn.io" || h.endsWith(".tb-cdn.io");
+    h === "torbox.app" ||
+    h.endsWith(".torbox.app") ||
+    h === "tb-cdn.pw" ||
+    h.endsWith(".tb-cdn.pw") ||
+    h === "tb-cdn.io" ||
+    h.endsWith(".tb-cdn.io");
   if (!isTorBoxHost(host)) {
-    // The signed URL itself must never be logged, but the hostname is safe and
-    // needed to update this allowlist when TorBox adds a CDN domain.
+    // The signed URL itself must never be logged, but the hostname is safe and needed to update this
+    // allowlist when TorBox adds a CDN domain.
     throw new Error(`TorBox returned a download URL on an unexpected host: ${host}`);
   }
-  // Defense-in-depth: an allowlisted CDN entry pointing at a private IP via
-  // DNS still must not be fetched.
+  // Defense-in-depth: an allowlisted CDN entry pointing at a private IP via DNS still must not be fetched.
   if (isPrivateHost(host)) {
     throw new Error("TorBox returned a download URL resolving to a private address.");
   }
   return url.toString();
 }
 
-/**
- * Asynchronously resolves the download URL's hostname and rejects any real
- * DNS destination that lands on a private / loopback / link-local or
- * unspecified IP (IPv4 or IPv6). This closes the DNS-rebinding gap that
- * assertSafeDownloadUrl's literal-only check leaves open: an allowlisted
- * CDN subrange whose A record is changed to an internal address.
- */
+/** Asynchronously resolves the download URL's hostname and rejects any real DNS destination that lands
+    on a private / loopback / link-local / unspecified IP (IPv4 or IPv6). Closes the DNS-rebinding gap
+    that assertSafeDownloadUrl's literal-only check leaves open: an allowlisted CDN subrange whose A
+    record is changed to an internal address. */
 export async function assertSafeDownloadUrlDns(raw: string): Promise<string> {
   const url = new URL(assertSafeDownloadUrl(raw));
   const host = url.hostname.toLowerCase();
@@ -414,13 +545,10 @@ export async function assertSafeDownloadUrlDns(raw: string): Promise<string> {
 /** Bound on redirect hops so a hostile/misconfigured CDN can't loop us. */
 const MAX_REDIRECT_HOPS = 5;
 
-/**
- * Fetches a TorBox download URL, following up to MAX_REDIRECT_HOPS redirects
- * manually with assertSafeDownloadUrlDns re-applied to every hop's target
- * (relative Locations resolved against the current URL). The initial URL was
- * validated by the caller; this keeps every subsequent hop on the same
- * host/DNS allowlist instead of trusting fetch's unchecked "follow" mode.
- */
+/** Fetches a TorBox download URL, following up to MAX_REDIRECT_HOPS redirects manually with
+    assertSafeDownloadUrlDns re-applied to every hop's target (relative Locations resolved against the
+    current URL). Keeps every hop on the same host/DNS allowlist instead of trusting fetch's unchecked
+    "follow" mode. */
 async function fetchWithValidatedRedirects(initialUrl: string): Promise<Response> {
   let currentUrl = initialUrl;
   for (let hops = 0; hops <= MAX_REDIRECT_HOPS; hops++) {
@@ -449,11 +577,8 @@ async function fetchWithValidatedRedirects(initialUrl: string): Promise<Response
   throw new Error(`CDN download exceeded ${MAX_REDIRECT_HOPS} redirects.`);
 }
 
-/**
- * True for loopback / private / link-local / unspecified IP addresses in
- * either IPv4 or IPv6 text form, including IPv4-mapped IPv6
- * (e.g. ::ffff:127.0.0.1). Used as a post-resolution guard.
- */
+/** True for loopback / private / link-local / unspecified IP addresses in either IPv4 or IPv6 text
+    form, including IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1). Used as a post-resolution guard. */
 function isPrivateIp(ip: string): boolean {
   const v6 = ip.toLowerCase();
   if (
@@ -484,10 +609,8 @@ function isPrivateIp(ip: string): boolean {
   return false;
 }
 
-/**
- * IPv4 private/loopback/link-local/CGNAT check shared by isPrivateIp and
- * isPrivateHost so the two paths can never drift.
- */
+/** IPv4 private/loopback/link-local/CGNAT check shared by isPrivateIp and isPrivateHost so the two
+    paths can never drift. */
 function isPrivateIpv4(a: number, b: number): boolean {
   if (a === 10) return true;
   if (a === 127) return true;
