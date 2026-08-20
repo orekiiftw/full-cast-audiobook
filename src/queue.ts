@@ -166,7 +166,10 @@ export const stitchJobId = (chapterId: string) => chapterId;
 /** BullMQ treats add(jobId=X) as a no-op when a job with that id already exists in ANY state —
     including failed/completed. A kept failed record would permanently block retries (regen re-stitch,
     sweep refill). Clear terminal leftovers first; live states (wait/delayed/active/…) stay and dedupe. */
-async function clearTerminalJob(queue: Queue<any, any, string>, jobId: string): Promise<void> {
+async function clearTerminalJob<DataType, ResultType, NameType extends string>(
+  queue: Queue<DataType, ResultType, NameType>,
+  jobId: string,
+): Promise<void> {
   const existing = await queue.getJob(jobId);
   if (!existing) return;
   const state = await existing.getState();

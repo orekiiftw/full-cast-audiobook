@@ -7,8 +7,10 @@ import type { Job } from "bullmq";
 import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { books, chapters, segments, castMembers } from "../schema";
-import { downloadBookFromTorrent, searchBookTorrent } from "../torboxService";
+import { downloadBookFromCandidates, downloadBookFromTorrent, resolveTorrentCandidates } from "../torboxService";
+import { searchCatalogueTorrentCandidates } from "../catalogueService";
 import { bookProviders, UnsupportedFormatError } from "../acquisition";
+import { fetchEpubFromArchiveOrg } from "../acquisition/providers";
 import { parseEpub } from "../epubService";
 import { segmentChapter } from "../segmentService";
 import { downloadFile, uploadFile, deleteFile } from "../r2";
@@ -42,7 +44,11 @@ export async function runIngestionJob(job: Job<IngestionJobData>): Promise<void>
   // Idempotent re-delivery / stale enqueue guard: ingestion only ever runs
   // on a book waiting to be discovered. (Retry flips failed → discovering
   // before re-enqueueing; a completed ingestion leaves in_progress/ready.)
-  const book = await db.select().from(books).where(eq(books.id, bookId)).then((r) => r[0]);
+  const book = await db
+    .select()
+    .from(books)
+    .where(eq(books.id, bookId))
+    .then((r) => r[0]);
   if (!book) return; // deleted while queued
   if (book.status !== "discovering") return;
 
@@ -89,7 +95,45 @@ export async function runIngestionJob(job: Job<IngestionJobData>): Promise<void>
           status: "discovering",
           message: `Searching torrents for "${title}"...`,
         });
-        magnet = await searchBookTorrent(title, author);
+        // Seed-health-aware resolver: ranks editions by TorBox cache/alive state and
+        // falls through cold editions instead of stalling on the first hit (design §5c).
+        let candidates = await resolveTorrentCandidates(title, author);
+        // Live indexers (apibay/torrents-csv/TorBox search) miss the long tail entirely
+        // (e.g. "Lord of the Mysteries" returns zero hits). Fall back to the offline
+        // catalogue, which has those books WITH resolved torrent infohashes.
+        if (!candidates.length) {
+          emitProgressEvent(bookId, "status_change", {
+            status: "discovering",
+            message: `No live torrents; checking catalogue for "${title}"...`,
+          });
+          candidates = await searchCatalogueTorrentCandidates(title, author);
+        }
+        if (candidates.length) {
+          try {
+            const dlResult = await downloadBookFromCandidates(candidates, {}, (progressMsg) => {
+              emitProgressEvent(bookId, "progress_log", { message: progressMsg });
+            });
+            epubBuffer = dlResult.buffer;
+          } catch (candErr: unknown) {
+            const candMsg = candErr instanceof Error ? candErr.message : String(candErr);
+            console.warn(`⚠️ Torrent/IPFS candidates failed (${candMsg}); attempting open digital library fallback...`);
+          }
+        }
+
+        // Open Digital Libraries (Internet Archive / Open Library) automated fallback:
+        // Millions of public domain, classic, and regional literature works (e.g. Godan,
+        // Wells, Tolstoy) have high-speed direct EPUBs available when torrent swarms are cold.
+        if (!epubBuffer && title) {
+          emitProgressEvent(bookId, "progress_log", {
+            message: `Checking Internet Archive / Open Library for "${title}"...`,
+          });
+          const archiveResult = await fetchEpubFromArchiveOrg(title, author, (progressMsg) => {
+            emitProgressEvent(bookId, "progress_log", { message: progressMsg });
+          });
+          if (archiveResult) {
+            epubBuffer = archiveResult.buffer;
+          }
+        }
       }
 
       if (!epubBuffer) {
@@ -140,9 +184,7 @@ export async function runIngestionJob(job: Job<IngestionJobData>): Promise<void>
       // deleteBook collected storage keys before this EPUB existed, so purge
       // the object we just uploaded or it orphans in storage permanently.
       if (uploadedEpubHere && epubR2Key) {
-        await deleteFile(epubR2Key).catch((err) =>
-          console.warn(`Could not purge EPUB of book deleted mid-ingestion (${bookId}):`, err)
-        );
+        await deleteFile(epubR2Key).catch((err) => console.warn(`Could not purge EPUB of book deleted mid-ingestion (${bookId}):`, err));
       }
       return;
     }
@@ -192,15 +234,11 @@ export async function runIngestionJob(job: Job<IngestionJobData>): Promise<void>
     let totalSegmentCount = 0;
     for (const p of planned) {
       if (p.segs.length > EPUB_LIMITS.MAX_SEGMENTS_PER_CHAPTER) {
-        throw new Error(
-          `A chapter produced too many segments (over ${EPUB_LIMITS.MAX_SEGMENTS_PER_CHAPTER}).`
-        );
+        throw new Error(`A chapter produced too many segments (over ${EPUB_LIMITS.MAX_SEGMENTS_PER_CHAPTER}).`);
       }
       totalSegmentCount += p.segs.length;
       if (totalSegmentCount > EPUB_LIMITS.MAX_SEGMENTS_PER_BOOK) {
-        throw new Error(
-          `This book would produce too many segments (over ${EPUB_LIMITS.MAX_SEGMENTS_PER_BOOK}).`
-        );
+        throw new Error(`This book would produce too many segments (over ${EPUB_LIMITS.MAX_SEGMENTS_PER_BOOK}).`);
       }
     }
 
@@ -216,7 +254,7 @@ export async function runIngestionJob(job: Job<IngestionJobData>): Promise<void>
           title: p.ch.title,
           status: (p.segs.length === 0 ? "failed" : "queued") as "failed" | "queued",
           totalCount: p.segs.length,
-        }))
+        })),
       )
       .returning({ id: chapters.id, chapterIndex: chapters.chapterIndex });
     const chapterIdByIndex = new Map(chapterRows.map((r) => [r.chapterIndex, r.id]));
@@ -308,7 +346,7 @@ async function readAcquiredEpub(stream: ReadableStream<Uint8Array>, maxBytes: nu
     stream,
     maxBytes,
     () => new UnsupportedFormatError("The provider file exceeds the 200MB EPUB limit."),
-    (chunk) => hash.update(chunk)
+    (chunk) => hash.update(chunk),
   );
   if (expectedSha256 && hash.digest("hex").toLowerCase() !== expectedSha256.toLowerCase()) {
     throw new UnsupportedFormatError("Provider file hash verification failed.");

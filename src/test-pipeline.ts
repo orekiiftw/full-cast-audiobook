@@ -1,11 +1,6 @@
 import { segmentChapter } from "./segmentService";
 import { parseEpub } from "./epubService";
-import {
-  ensureWavBuffer,
-  escapeFfmpegConcatPath,
-  isSafeStorageKey,
-  pcmToWav,
-} from "./audioUtils";
+import { ensureWavBuffer, escapeFfmpegConcatPath, isSafeStorageKey, pcmToWav } from "./audioUtils";
 import { SEGMENT } from "./lib/constants";
 
 async function runTests() {
@@ -19,13 +14,16 @@ async function runTests() {
     { type: "dialogue" as const, text: '"Hello there!" he said, walking towards the counter.' },
     { type: "narration" as const, text: "The receptionist looked up. She seemed tired." },
     { type: "dialogue" as const, text: '"Can I help you?"' },
-    { type: "narration" as const, text: "He nodded. He explained his situation in detail, telling her about the storm, the car breaking down on the highway, and how he had walked for two miles in the freezing rain just to find some shelter." }
+    {
+      type: "narration" as const,
+      text: "He nodded. He explained his situation in detail, telling her about the storm, the car breaking down on the highway, and how he had walked for two miles in the freezing rain just to find some shelter.",
+    },
   ];
 
   const segments = segmentChapter(mockBlocks);
   console.log(`✅ Segmenter returned ${segments.length} segments.`);
   console.log(`   Segment 1 text length: ${segments[0]?.text.length || 0} characters.`);
-  
+
   if (segments.length > 0) {
     console.log(`   Sample segment: "${segments[0].text}"`);
   }
@@ -33,21 +31,14 @@ async function runTests() {
   // Oversized run with no terminal punctuation must be hard-split
   const longWords = Array.from({ length: 650 }, (_, i) => `word${i}`).join(" ");
   const longSegs = segmentChapter([{ type: "narration" as const, text: longWords }]);
-  const maxWordsInSeg = Math.max(
-    ...longSegs.map((s) => s.text.trim().split(/\s+/).filter(Boolean).length),
-    0
-  );
+  const maxWordsInSeg = Math.max(...longSegs.map((s) => s.text.trim().split(/\s+/).filter(Boolean).length), 0);
   if (maxWordsInSeg > SEGMENT.HARD_MAX_WORDS) {
-    throw new Error(
-      `Oversized sentence bypassed hard cap: got ${maxWordsInSeg} words (cap ${SEGMENT.HARD_MAX_WORDS})`
-    );
+    throw new Error(`Oversized sentence bypassed hard cap: got ${maxWordsInSeg} words (cap ${SEGMENT.HARD_MAX_WORDS})`);
   }
   if (longSegs.length < 2) {
     throw new Error("Expected oversized text to produce multiple segments");
   }
-  console.log(
-    `✅ Oversized sentence hard-split into ${longSegs.length} segments (max ${maxWordsInSeg} words).`
-  );
+  console.log(`✅ Oversized sentence hard-split into ${longSegs.length} segments (max ${maxWordsInSeg} words).`);
 
   // 2. Test FFmpeg Availability
   console.log("\n2. Testing Local FFmpeg Install...");
@@ -59,9 +50,10 @@ async function runTests() {
     } else {
       console.warn("⚠️ FFmpeg command returned non-zero status.");
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
     console.error("❌ FFmpeg is NOT installed or not accessible in path. Audio stitching will fail!");
-    console.error(`   Error details: ${err.message}`);
+    console.error(`   Error details: ${msg}`);
   }
 
   try {
@@ -72,9 +64,10 @@ async function runTests() {
     } else {
       console.warn("⚠️ FFprobe command returned non-zero status.");
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
     console.error("❌ FFprobe is NOT installed or not accessible in path. Audio duration checks will fail!");
-    console.error(`   Error details: ${err.message}`);
+    console.error(`   Error details: ${msg}`);
   }
 
   // 3. Test EPUB Parser logic (compilation check)
@@ -83,8 +76,9 @@ async function runTests() {
     if (typeof parseEpub === "function") {
       console.log("✅ EPUB parser module compiles and exports successfully.");
     }
-  } catch (err: any) {
-    console.error(`❌ EPUB parser failed verification: ${err.message}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`❌ EPUB parser failed verification: ${msg}`);
   }
 
   // 4. Audio utils + storage key safety
