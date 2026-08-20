@@ -71,19 +71,6 @@ export interface BookDetailResponse {
   playbackState: PlaybackState | null;
 }
 
-export interface ChapterSegmentsResponse {
-  chapter: Chapter;
-  segments: Segment[];
-}
-
-export type PipelineEventType =
-  | "status_change"
-  | "chapter_status"
-  | "segment_ready"
-  | "segment_failed"
-  | "quota_exceeded"
-  | "progress_log";
-
 interface PipelineEventBase {
   bookId: string;
   timestamp: number;
@@ -141,12 +128,7 @@ export interface ProgressLogEvent extends PipelineEventBase {
  * typo'd property is a compile error instead of a silent `undefined`.
  */
 export type PipelineEvent =
-  | StatusChangeEvent
-  | ChapterStatusEvent
-  | SegmentReadyEvent
-  | SegmentFailedEvent
-  | QuotaExceededEvent
-  | ProgressLogEvent;
+  StatusChangeEvent | ChapterStatusEvent | SegmentReadyEvent | SegmentFailedEvent | QuotaExceededEvent | ProgressLogEvent;
 
 export interface ApiError {
   error: string;
@@ -162,9 +144,4 @@ export interface AuthUser {
 
 export interface AuthResponse {
   user: AuthUser;
-}
-
-export interface AuthCredentials {
-  email: string;
-  password: string;
 }

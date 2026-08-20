@@ -16,20 +16,4 @@ export class ProviderUnavailableError extends AcquisitionError {
     super(message, { retryable: true, provider, cause });
   }
 }
-export class MirrorUnavailableError extends AcquisitionError {
-  constructor(message: string, provider?: string, cause?: unknown) {
-    super(message, { retryable: true, provider, cause });
-  }
-}
-export class RateLimitedError extends AcquisitionError {
-  constructor(message: string, provider?: string, cause?: unknown) {
-    super(message, { retryable: true, provider, cause });
-  }
-}
-export class DownloadFailedError extends AcquisitionError {
-  constructor(message: string, retryable = false, provider?: string, cause?: unknown) {
-    super(message, { retryable, provider, cause });
-  }
-}
-export class InvalidBookError extends AcquisitionError {}
 export class UnsupportedFormatError extends AcquisitionError {}

@@ -1,6 +1,7 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import * as fs from "fs/promises";
 import * as path from "path";
+import { createHash } from "crypto";
 import { isSafeStorageKey } from "./audioUtils";
 
 /** Storage backend selection is fixed at boot: R2 when fully configured (R2 only, no silent local
@@ -35,9 +36,23 @@ function assertSafeKey(key: string): void {
 
 function localPathForKey(key: string): string {
   assertSafeKey(key);
-  const safeName = encodeURIComponent(key);
-  const filePath = path.join(LOCAL_STORAGE_DIR, safeName);
-  if (!filePath.startsWith(LOCAL_STORAGE_DIR + path.sep) && filePath !== LOCAL_STORAGE_DIR) {
+  // Shard by hash of the key so no single filename approaches the 255-byte
+  // filesystem limit (isSafeStorageKey allows 512-char keys). encodeURIComponent
+  // of a 512-char key can exceed ENAMETOOLONG on ext4.
+  const encoded = encodeURIComponent(key);
+  // If encoded still fits comfortably, keep single-file layout; otherwise shard
+  // into 2-char prefix dirs derived from a stable hash of the key.
+  if (encoded.length <= 200) {
+    const filePath = path.join(LOCAL_STORAGE_DIR, encoded);
+    if (!filePath.startsWith(LOCAL_STORAGE_DIR + path.sep) && filePath !== LOCAL_STORAGE_DIR) {
+      throw new Error(`Path escape blocked for key: ${key}`);
+    }
+    return filePath;
+  }
+  const hash = createHash("sha256").update(key).digest("hex");
+  const shardDir = path.join(LOCAL_STORAGE_DIR, hash.slice(0, 2), hash.slice(2, 4));
+  const filePath = path.join(shardDir, hash + "_" + encoded.slice(-100));
+  if (!filePath.startsWith(LOCAL_STORAGE_DIR + path.sep)) {
     throw new Error(`Path escape blocked for key: ${key}`);
   }
   return filePath;
@@ -71,7 +86,9 @@ export async function uploadFile(key: string, body: Buffer, contentType: string)
   }
 
   await ensureLocalStorage();
-  await fs.writeFile(localPathForKey(key), body);
+  const localPath = localPathForKey(key);
+  await fs.mkdir(path.dirname(localPath), { recursive: true });
+  await fs.writeFile(localPath, body);
   return key;
 }
 
@@ -316,30 +333,4 @@ export async function streamFile(key: string, range: StreamRange | null, knownSi
     totalSize,
     partial: !!range && length < totalSize,
   };
-}
-
-export async function fileExists(key: string): Promise<boolean> {
-  if (!isSafeStorageKey(key)) return false;
-
-  if (s3Client && R2_BUCKET) {
-    try {
-      await s3Client.send(
-        new HeadObjectCommand({
-          Bucket: R2_BUCKET,
-          Key: key,
-        }),
-      );
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  try {
-    await ensureLocalStorage();
-    await fs.access(localPathForKey(key));
-    return true;
-  } catch {
-    return false;
-  }
 }
