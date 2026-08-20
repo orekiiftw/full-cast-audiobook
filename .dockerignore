@@ -21,6 +21,3 @@ Thumbs.db
 tmp
 temp
 *.tmp
-
-# Test artifacts not needed at runtime
-src/test-pipeline.ts

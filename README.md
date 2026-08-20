@@ -107,13 +107,9 @@ Push the database schema directly to PostgreSQL using Drizzle Kit (this creates 
 bun run db:push
 ```
 
-### 4. Diagnostics check
-Run the diagnostic script to verify services compile and that `ffmpeg`/`ffprobe` are correctly installed on the system:
-```bash
-bun run test:pipeline
-```
+### 4. Verify TypeScript
 
-You can also verify strict TypeScript correctness at any time:
+Verify strict TypeScript correctness at any time:
 ```bash
 bun run typecheck
 ```
