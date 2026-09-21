@@ -105,7 +105,7 @@ mock.module("../../narration/voiceContext", () => ({
 }));
 
 import { segmentRoutes } from "./segments";
-import { dispatchRoute } from "../route";
+import { dispatchRoute } from "../testSupport";
 import { AuthUser } from "../../auth";
 
 const testUser: AuthUser = {

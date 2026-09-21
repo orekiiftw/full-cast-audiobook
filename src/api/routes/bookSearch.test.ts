@@ -19,7 +19,7 @@ mock.module("../../db", () => ({
 }));
 
 import { bookSearchRoutes } from "./bookSearch";
-import { dispatchRoute } from "../route";
+import { dispatchRoute } from "../testSupport";
 import { AuthUser } from "../../auth";
 
 const testUser: AuthUser = {

@@ -88,7 +88,7 @@ mock.module("../../acquisition", () => ({
 }));
 
 import { bookRoutes } from "./books";
-import { dispatchRoute } from "../route";
+import { dispatchRoute } from "../testSupport";
 import { AuthUser } from "../../auth";
 
 const testUser: AuthUser = {

@@ -51,7 +51,7 @@ mock.module("../../queue", () => ({
 }));
 
 import { pronunciationRoutes } from "./pronunciation";
-import { dispatchRoute } from "../route";
+import { dispatchRoute } from "../testSupport";
 import { AuthUser } from "../../auth";
 
 const testUser: AuthUser = {
