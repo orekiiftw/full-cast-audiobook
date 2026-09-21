@@ -58,7 +58,7 @@ src/
 └── types/api.ts            # Shared API/domain types
 ```
 
-Rationale that used to live in code comments is collected in [`docs/notes/`](docs/notes).
+Rationale that used to live in code comments is collected in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ### Installing FFmpeg
 
@@ -94,7 +94,7 @@ Ensure you configure:
 - `GEMINI_API_KEY`: API credentials from Google AI Studio (used for emotional beat annotation).
 - `MIMO_API_KEY`: API key from the [Xiaomi MiMo console](https://platform.xiaomimimo.com/console/api-keys) (used for TTS synthesis — see the [MiMo speech synthesis docs](https://mimo.mi.com/docs/usage-guide/speech-synthesis-v2.5)). `MIMO_TS_MODEL` (default `mimo-v2.5-tts`) and `MIMO_TS_BASE_URL` (default `https://api.xiaomimimo.com/v1`) are optional overrides; set `MIMO_TS_MODEL=mimo-v2.5-tts-voicedesign` to narrate with a voice described in natural language instead of a built-in voice.
 - `TORBOX_API_KEY`: API credentials from TorBox (required for torrent caching/downloads).
-- `BOOK_PROVIDERS_ENABLED`: Comma-separated reviewed acquisition providers (default: `torrent,archive-org`). `anna-archive` is deliberately disabled until a vetted sidecar adapter replaces its fail-closed stub; see [`docs/acquisition-architecture.md`](docs/acquisition-architecture.md).
+- `BOOK_PROVIDERS_ENABLED`: Comma-separated reviewed acquisition providers (default: `torrent,archive-org`). `anna-archive` is deliberately disabled until a vetted sidecar adapter replaces its fail-closed stub; see [`ARCHITECTURE.md`](ARCHITECTURE.md).
 - `BOOK_SEARCH_CACHE_TTL_MS`, `BOOK_SEARCH_MAX_RESULTS`, `PREFERRED_LANGUAGES`, and `PREFERRED_FORMATS`: Provider-search cache and ranking policy controls.
 - `R2_*`: Cloudflare R2 storage credentials (optional; the app falls back to local `./.storage/` folder if unset).
 - `HOST` / `PORT`: Bind address (default `127.0.0.1:3000`). Keep it on loopback unless you're ready to expose it; the API requires an authenticated session cookie (email + password signup/login stored in a same-origin HttpOnly cookie).
