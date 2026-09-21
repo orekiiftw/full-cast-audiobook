@@ -1,22 +1,36 @@
-/**
- * Maintenance sweep (runs every QUEUE.SWEEP_INTERVAL_MS via the repeatable job):
- * self-healing pass over DB state that outlived its queue job.
- */
 import { and, asc, eq, inArray, lt, sql, gt } from "drizzle-orm";
 import { db } from "../db";
 import { books, chapters, segments } from "../schema";
 import { PIPELINE, QUEUE } from "../lib/constants";
-import { emitProgressEvent, enqueueSegmentJobs, enqueueStitch, ingestJobId, ingestionQueue, segmentJobId, segmentQueue } from "../queue";
+import {
+  emitProgressEvent,
+  enqueueSegmentJobs,
+  enqueueStitch,
+  ingestJobId,
+  ingestionQueue,
+  isLockHeld,
+  segmentJobId,
+  segmentQueue,
+} from "../queue";
+import { incrementFailedCount, shouldEnqueueStitch } from "./chapterCounters";
 
-/** Job states in which BullMQ owns the row's lifecycle — never touch these. */
 const LIVE_JOB_STATES = new Set(["wait", "delayed", "prioritized", "active", "waiting-children"]);
 
-/**
- * Queued segments of in-progress books awaiting (re)materialization as BullMQ
- * jobs — shared shape for the sweep's watermark refill and boot recovery
- * paging. Callers append their own orderBy/limit ($dynamic()). The optional
- * cursor enables keyset pagination so a shrinking live set can't skip rows.
- */
+const ORPHANED_SEGMENT_LIMIT = 500;
+const STRANDED_QUEUED_LIMIT = 200;
+const REFILL_LIMIT = 2_000;
+const STITCH_CANDIDATE_LIMIT = 500;
+const STUCK_INGESTION_LIMIT = 200;
+
+interface MidflightSegment {
+  segmentId: string;
+  chapterId: string;
+  bookId: string;
+  chapterIndex: number;
+  segmentIndex: number;
+  attempts: number;
+}
+
 export function queuedSegmentsQuery(afterSegmentId?: string) {
   return db
     .select({
@@ -30,28 +44,20 @@ export function queuedSegmentsQuery(afterSegmentId?: string) {
     .innerJoin(chapters, eq(segments.chapterId, chapters.id))
     .innerJoin(books, eq(chapters.bookId, books.id))
     .where(
-      and(
-        eq(segments.status, "queued"),
-        eq(books.status, "in_progress"),
-        afterSegmentId ? gt(segments.id, afterSegmentId) : undefined
-      )
+      and(eq(segments.status, "queued"), eq(books.status, "in_progress"), afterSegmentId ? gt(segments.id, afterSegmentId) : undefined),
     )
     .$dynamic();
 }
 
-/**
- * Self-healing pass over DB state that outlived its queue job. Each check is
- * idempotent and safe to run on any instance at any time:
- * 1. Segments stuck processing/annotated whose job is gone (Redis data loss,
- *    stalled-out jobs) → requeue (or fail when attempts are exhausted).
- * 2. Queue depth near zero while the DB still has queued rows (Redis flush)
- *    → re-materialize segment jobs from the DB.
- * 3. Chapters that are counter-terminal but never stitched → enqueue stitch.
- * 4. Books stuck "discovering" beyond INGESTION_STUCK_MS → failed.
- */
 export async function runPipelineSweep(): Promise<void> {
-  // 1. Orphaned mid-flight segments. Bounded: normally this set is tiny
-  //    (≤ live workers), so a per-row getJob is cheap.
+  await requeueOrphanedMidflightSegments();
+  await rematerializeStrandedQueuedSegments();
+  await refillSegmentQueue();
+  await enqueueCounterTerminalStitches();
+  await failStuckIngestions();
+}
+
+async function requeueOrphanedMidflightSegments(): Promise<void> {
   const midflight = await db
     .select({
       segmentId: segments.id,
@@ -64,108 +70,119 @@ export async function runPipelineSweep(): Promise<void> {
     .from(segments)
     .innerJoin(chapters, eq(segments.chapterId, chapters.id))
     .where(inArray(segments.status, ["processing", "annotated"]))
-    .limit(500);
+    .limit(ORPHANED_SEGMENT_LIMIT);
 
   for (const row of midflight) {
     try {
-      const job = await segmentQueue.getJob(segmentJobId(row.segmentId));
-      const state = job ? await job.getState() : "unknown";
-      if (LIVE_JOB_STATES.has(state)) continue; // BullMQ owns it (incl. stalled recovery)
-      // The job is gone or terminally failed — the row is orphaned.
-      if (job) await job.remove().catch(() => {});
-      // A job that died WITHOUT the processor's catch running (stalled out
-      // past maxStalledCount) never recorded its attempt in the DB. Count it
-      // here, or a segment that can never finish is requeued forever.
-      const effectiveAttempts = row.attempts + (state === "failed" ? 1 : 0);
-      if (effectiveAttempts >= PIPELINE.MAX_SEGMENT_ATTEMPTS) {
-        const newlyFailed = await db
-          .update(segments)
-          .set({ status: "failed", attempts: effectiveAttempts })
-          .where(and(eq(segments.id, row.segmentId), sql`${segments.status} != 'failed'`))
-          .returning({ id: segments.id });
-        if (newlyFailed.length > 0) {
-          const counters = await db
-            .update(chapters)
-            .set({ failedCount: sql`${chapters.failedCount} + 1` })
-            .where(eq(chapters.id, row.chapterId))
-            .returning({
-              voicedCount: chapters.voicedCount,
-              failedCount: chapters.failedCount,
-              totalCount: chapters.totalCount,
-            })
-            .then((r) => r[0]);
-          if (counters && counters.totalCount > 0 && counters.voicedCount + counters.failedCount >= counters.totalCount) {
-            await enqueueStitch({ bookId: row.bookId, chapterId: row.chapterId, chapterIndex: row.chapterIndex });
-          }
-        }
-        console.warn(`🧹 Sweep marked orphaned segment ${row.segmentId} failed (job state: ${state}).`);
-      } else {
-        await db
-          .update(segments)
-          .set({ status: "queued", attempts: effectiveAttempts })
-          .where(eq(segments.id, row.segmentId));
-        await enqueueSegmentJobs([row]);
-        console.warn(`🧹 Sweep requeued orphaned segment ${row.segmentId} (job state: ${state}).`);
-      }
+      await resolveOrphanedSegment(row);
     } catch (err) {
       console.error(`Sweep failed for segment ${row.segmentId}:`, err);
     }
   }
+}
 
-  // 2. Watermark refill: the queue should hold work whenever the DB does.
-  const counts = await segmentQueue.getJobCounts("wait", "active", "delayed", "prioritized");
-  const depth = counts.wait + counts.active + counts.delayed + counts.prioritized;
-  if (depth < QUEUE.QUEUED_REFILL_WATERMARK) {
-    const queuedRows = await queuedSegmentsQuery()
-      .orderBy(asc(chapters.bookId), asc(chapters.chapterIndex), asc(segments.segmentIndex))
-      .limit(2000);
-    if (queuedRows.length > 0) {
-      await enqueueSegmentJobs(queuedRows);
-      console.log(`🧹 Sweep refilled ${queuedRows.length} queued segment job(s) (queue depth was ${depth}).`);
+async function resolveOrphanedSegment(row: MidflightSegment): Promise<void> {
+  if (await isLockHeld(`regen:${row.segmentId}`)) return;
+
+  const job = await segmentQueue.getJob(segmentJobId(row.segmentId));
+  const state = job ? await job.getState() : "unknown";
+  if (LIVE_JOB_STATES.has(state)) return;
+
+  if (job) await job.remove().catch(() => {});
+
+  const effectiveAttempts = row.attempts + (state === "failed" ? 1 : 0);
+  if (effectiveAttempts >= PIPELINE.MAX_SEGMENT_ATTEMPTS) {
+    await failOrphanedSegment(row, state, effectiveAttempts);
+    return;
+  }
+
+  await requeueOrphanedSegment(row, state, effectiveAttempts);
+}
+
+async function failOrphanedSegment(row: MidflightSegment, jobState: string, attempts: number): Promise<void> {
+  const newlyFailed = await db
+    .update(segments)
+    .set({ status: "failed", attempts })
+    .where(and(eq(segments.id, row.segmentId), sql`${segments.status} != 'failed'`))
+    .returning({ id: segments.id });
+
+  if (newlyFailed.length > 0) {
+    const counters = await incrementFailedCount(row.chapterId);
+    if (shouldEnqueueStitch(counters)) {
+      await enqueueStitch({ bookId: row.bookId, chapterId: row.chapterId, chapterIndex: row.chapterIndex });
     }
   }
 
-  // 3. Chapters that finished voicing but never stitched. Conditioned on the
-  //    terminal counters (not just status): blindly enqueueing every
-  //    in-flight chapter produced jobs that only early-return, and an active
-  //    early-returning job used to dedupe away the one terminal enqueue that
-  //    mattered. "queued" is included so a counter-terminal chapter whose
-  //    attempts all threw before the status flip still reaches the stitcher.
+  console.warn(`🧹 Sweep marked orphaned segment ${row.segmentId} failed (job state: ${jobState}).`);
+}
+
+async function requeueOrphanedSegment(row: MidflightSegment, jobState: string, attempts: number): Promise<void> {
+  await db.update(segments).set({ status: "queued", attempts }).where(eq(segments.id, row.segmentId));
+  await enqueueSegmentJobs([row]);
+  console.warn(`🧹 Sweep requeued orphaned segment ${row.segmentId} (job state: ${jobState}).`);
+}
+
+async function rematerializeStrandedQueuedSegments(): Promise<void> {
+  await enqueueQueuedSegments(
+    STRANDED_QUEUED_LIMIT,
+    (count) => `🧹 Sweep re-materialized ${count} queued segment row(s) (deduped against live jobs).`,
+  );
+}
+
+async function refillSegmentQueue(): Promise<void> {
+  const counts = await segmentQueue.getJobCounts("wait", "active", "delayed", "prioritized");
+  const depth = counts.wait + counts.active + counts.delayed + counts.prioritized;
+  if (depth >= QUEUE.QUEUED_REFILL_WATERMARK) return;
+
+  await enqueueQueuedSegments(REFILL_LIMIT, (count) => `🧹 Sweep refilled ${count} queued segment job(s) (queue depth was ${depth}).`);
+}
+
+async function enqueueQueuedSegments(limit: number, describe: (count: number) => string): Promise<void> {
+  const queuedRows = await queuedSegmentsQuery()
+    .orderBy(asc(chapters.bookId), asc(chapters.chapterIndex), asc(segments.segmentIndex))
+    .limit(limit);
+  if (queuedRows.length === 0) return;
+
+  await enqueueSegmentJobs(queuedRows);
+  console.log(describe(queuedRows.length));
+}
+
+async function enqueueCounterTerminalStitches(): Promise<void> {
   const stitchCandidates = await db
     .select()
     .from(chapters)
     .where(
       and(
         inArray(chapters.status, ["queued", "processing", "partial_ready"]),
-        sql`${chapters.voicedCount} + ${chapters.failedCount} >= ${chapters.totalCount}`
-      )
+        sql`${chapters.voicedCount} + ${chapters.failedCount} >= ${chapters.totalCount}`,
+      ),
     )
-    .limit(500);
-  for (const ch of stitchCandidates) {
+    .limit(STITCH_CANDIDATE_LIMIT);
+
+  for (const chapter of stitchCandidates) {
     try {
-      await enqueueStitch({ bookId: ch.bookId, chapterId: ch.id, chapterIndex: ch.chapterIndex });
+      await enqueueStitch({ bookId: chapter.bookId, chapterId: chapter.id, chapterIndex: chapter.chapterIndex });
     } catch (err) {
-      console.error(`Failed to enqueue stitch for chapter ${ch.id} during sweep:`, err);
+      console.error(`Failed to enqueue stitch for chapter ${chapter.id} during sweep:`, err);
     }
   }
+}
 
-  // 4. Ingestions whose worker died before marking the book failed. The
-  //    createdAt age is only a pre-filter — the authoritative check is
-  //    whether BullMQ still owns the job. A retried book keeps its original
-  //    createdAt, so without the liveness check the sweep used to fail
-  //    healthy mid-run ingestions of any book older than INGESTION_STUCK_MS.
+async function failStuckIngestions(): Promise<void> {
   const stuckBefore = new Date(Date.now() - QUEUE.INGESTION_STUCK_MS);
   const stuckCandidates = await db
     .select({ id: books.id })
     .from(books)
     .where(and(inArray(books.status, ["discovering", "casting"]), lt(books.createdAt, stuckBefore)))
-    .limit(200);
+    .limit(STUCK_INGESTION_LIMIT);
+
   const interrupted: Array<{ id: string }> = [];
   for (const candidate of stuckCandidates) {
     try {
       const job = await ingestionQueue.getJob(ingestJobId(candidate.id));
       const state = job ? await job.getState() : "unknown";
-      if (LIVE_JOB_STATES.has(state)) continue; // legitimately still running
+      if (LIVE_JOB_STATES.has(state)) continue;
+
       const failedRows = await db
         .update(books)
         .set({ status: "failed" })
@@ -176,6 +193,7 @@ export async function runPipelineSweep(): Promise<void> {
       console.error(`Sweep failed for stuck-ingestion check of book ${candidate.id}:`, err);
     }
   }
+
   for (const book of interrupted) {
     emitProgressEvent(book.id, "status_change", { status: "failed", error: "Ingestion was interrupted. Use Retry." });
   }

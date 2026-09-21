@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import App from "./App.tsx";
-import { ToastProvider } from "./components/ui/Toast.tsx";
+import { App } from "./App.tsx";
+import { ToastProvider } from "./components/ui";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -9,5 +9,5 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <ToastProvider>
       <App />
     </ToastProvider>
-  </React.StrictMode>
+  </React.StrictMode>,
 );

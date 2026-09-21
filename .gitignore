@@ -30,3 +30,7 @@ Thumbs.db
 tmp/
 temp/
 *.tmp
+
+# Self-contained offline book catalogue service (scratch; deletable)
+# Everything for this lives under catalogue/ and is excluded from the app.
+catalogue/

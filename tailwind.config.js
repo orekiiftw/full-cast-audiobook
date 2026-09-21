@@ -1,37 +1,34 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
+  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
   theme: {
     extend: {
       colors: {
         cinema: {
-          950: "#07070b",
-          900: "#0c0c12",
-          850: "#101018",
-          800: "#16161f",
-          700: "#1e1e2a",
-          600: "#2a2a3a",
-          500: "#3d3d52",
-          400: "#6e6e86",
-          300: "#9b9bb0",
-          200: "#c8c8d6",
-          100: "#f0f0f5",
+          950: "#101916",
+          900: "#16221d",
+          850: "#1b2822",
+          800: "#223129",
+          700: "#31443a",
+          600: "#536b5d",
+          500: "#819689",
+          400: "#a1b1a6",
+          300: "#c0ccc2",
+          200: "#dce2d7",
+          100: "#f5f2e9",
         },
         gold: {
-          50: "#fbf7ef",
-          100: "#f5ebd6",
-          200: "#ead4a8",
-          300: "#dfbc78",
-          400: "#d4a85a",
-          500: "#c4923e",
-          600: "#a87532",
-          700: "#875928",
-          800: "#6e4724",
-          900: "#5a3b20",
-          950: "#321f10",
+          50: "#fafbf3",
+          100: "#edf2db",
+          200: "#e1e9c5",
+          300: "#d4e1ac",
+          400: "#c5d697",
+          500: "#b7ca82",
+          600: "#8ea661",
+          700: "#6c8349",
+          800: "#4c6136",
+          900: "#34472a",
+          950: "#1c2d1a",
         },
         mist: {
           400: "#a8a4c0",
@@ -56,8 +53,7 @@ export default {
       backgroundImage: {
         "mesh-gold":
           "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(196,146,62,0.12), transparent), radial-gradient(ellipse 60% 40% at 100% 0%, rgba(120,90,200,0.06), transparent), radial-gradient(ellipse 50% 30% at 0% 100%, rgba(196,146,62,0.05), transparent)",
-        "cover-sheen":
-          "linear-gradient(145deg, rgba(255,255,255,0.08) 0%, transparent 40%, transparent 60%, rgba(0,0,0,0.2) 100%)",
+        "cover-sheen": "linear-gradient(145deg, rgba(255,255,255,0.08) 0%, transparent 40%, transparent 60%, rgba(0,0,0,0.2) 100%)",
       },
       keyframes: {
         "fade-in": {
@@ -96,4 +92,4 @@ export default {
     },
   },
   plugins: [],
-}
+};

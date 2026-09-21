@@ -1,5 +1,4 @@
-import { Card } from "../ui/Card";
-import { Icon } from "../ui/Icon";
+import { Card, Icon } from "../ui";
 import type { CastMember } from "../../types/api";
 
 interface NarratorCardProps {
@@ -10,38 +9,48 @@ interface NarratorCardProps {
 
 export function NarratorCard({ narrator, playingPreviewId, onPlayPreview }: NarratorCardProps) {
   return (
-    <section className="mb-14">
-      <div className="flex items-baseline justify-between pb-4 mb-5 border-b border-white/[0.05]">
-        <h2 className="font-serif text-2xl font-medium tracking-tight">Narration</h2>
-        <span className="label-caps">Single narrator</span>
+    <section aria-labelledby="narration-heading" className="min-w-0">
+      <div className="mb-5 flex flex-wrap items-baseline justify-between gap-2 border-b border-cinema-700 pb-4">
+        <h2 id="narration-heading" className="font-serif text-2xl font-medium tracking-tight text-gold-50">
+          Narration
+        </h2>
+        <span className="label-caps">One voice, every character</span>
       </div>
-      <Card className="p-4 flex justify-between items-center gap-4" isInteractive>
-        <div className="min-w-0">
-          <h4 className="font-serif text-[15px] font-medium truncate">
-            {narrator.name}
-            <span className="ml-2 text-[11px] font-sans font-normal text-gold-400/90 uppercase tracking-[0.14em]">
-              {narrator.ttsVoiceName}
-            </span>
-          </h4>
-          <p className="text-[11px] text-cinema-400 mt-1 tracking-wide">
-            Voices every character &amp; narration
-          </p>
-          <p className="text-[11px] text-cinema-500 mt-1.5 italic line-clamp-1 font-serif">
-            “{narrator.styleString}”
-          </p>
-        </div>
+      <Card className="p-5 sm:p-6">
+        <NarratorProfile narrator={narrator} />
+        <p className="break-words font-serif text-base italic leading-relaxed text-cinema-300">“{narrator.styleString}”</p>
         <button
+          type="button"
           onClick={() => onPlayPreview(narrator.id)}
-          aria-label={`Preview narrator voice ${narrator.ttsVoiceName}`}
-          className={`w-10 h-10 shrink-0 rounded-full border flex items-center justify-center transition-all duration-300 ${
+          aria-label={`${playingPreviewId === narrator.id ? "Pause" : "Play"} narrator voice preview for ${narrator.ttsVoiceName}`}
+          className={`mt-5 flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-400 focus-visible:ring-offset-2 focus-visible:ring-offset-cinema-900 ${
             playingPreviewId === narrator.id
-              ? "border-gold-400/50 bg-gold-500/15 text-gold-300 shadow-glow-sm"
-              : "border-white/[0.08] text-gold-400 hover:border-gold-500/40 hover:bg-gold-500/10"
+              ? "border-gold-400/50 bg-gold-500/10 text-gold-200"
+              : "border-cinema-600 text-cinema-200 hover:border-gold-500/50 hover:text-gold-200"
           }`}
         >
           <Icon name={playingPreviewId === narrator.id ? "pause" : "play"} size={14} />
+          {playingPreviewId === narrator.id ? "Pause preview" : "Preview voice"}
         </button>
       </Card>
     </section>
+  );
+}
+
+function NarratorProfile({ narrator }: { narrator: CastMember }) {
+  return (
+    <div className="mb-4 flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <p className="label-caps text-gold-300">Your narrator</p>
+        <h3 className="mt-2 break-words font-serif text-2xl text-cinema-100">{narrator.ttsVoiceName}</h3>
+        <p className="mt-1 text-xs text-cinema-400">{narrator.name}</p>
+      </div>
+      <span
+        aria-hidden="true"
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-cinema-700 text-gold-300"
+      >
+        <Icon name="microphone" size={18} />
+      </span>
+    </div>
   );
 }

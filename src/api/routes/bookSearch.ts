@@ -1,85 +1,101 @@
 import { bookProviders } from "../../acquisition";
 import { BookFormat, SearchQuery } from "../../acquisition/types";
 import { json } from "../response";
-import { boundedString, readJsonWithLimit, ValidationError } from "../../lib/validators";
-import { AuthUser } from "../../auth";
+import { type RouteContext, type RouteTable } from "../route";
+import { ValidationError, boundedString } from "../../lib/validators";
+import { readJsonWithLimit } from "../body";
+import { ACQUISITION } from "../../lib/constants";
+import { createRateLimiter } from "../rateLimit";
 
-const SEARCH_PATH = "/api/book-search";
-const DETAIL_RE = /^\/api\/book-search\/([^/]+)\/([^/]+)$/;
 const MAX_QUERY_LENGTH = 500;
-/** Provider identifiers are short enum-ish names; bound generously. */
-const MAX_PROVIDER_LENGTH = 64;
-/**
- * Provider book IDs vary (info-hashes, magnet URIs, catalogue IDs). A magnet
- * URI is the longest realistic value (~2KB); cap well above that and reject
- * anything larger before it can upsert an unbounded book_metadata row.
- */
-const MAX_PROVIDER_BOOK_ID_LENGTH = 4096;
-
-/**
- * Per-user throttle for provider lookups. The search endpoint spends upstream
- * provider quota, and the detail endpoint upserts a book_metadata row per
- * unique (provider, id) — unthrottled, an authenticated user could flood
- * unique IDs for unbounded table growth. Fixed-window, per instance (same
- * documented model as the login rate limit).
- */
+const MAX_QUERY_FIELD_LENGTH = 32;
+const MAX_RESULTS = 100;
+const SEARCH_BODY_LIMIT_BYTES = 32 * 1024;
 const SEARCH_WINDOW_MS = 15 * 60 * 1000;
 const SEARCH_MAX_REQUESTS = 60;
-const searchAttempts = new Map<string, { count: number; resetAt: number }>();
-let searchLastSweep = 0;
+const BOOK_FORMATS = new Set<string>(["epub", "pdf", "mobi", "azw3", "unknown"]);
 
-function searchRateLimited(userId: string): boolean {
-  const now = Date.now();
-  if (now - searchLastSweep >= 60_000) {
-    searchLastSweep = now;
-    for (const [key, entry] of searchAttempts) {
-      if (entry.resetAt <= now) searchAttempts.delete(key);
-    }
+export const searchRateLimited = createRateLimiter({ windowMs: SEARCH_WINDOW_MS, maxAttempts: SEARCH_MAX_REQUESTS });
+
+export const bookSearchRoutes: RouteTable = {
+  "POST /api/book-search": searchBooks,
+  "GET /api/book-search/:provider/:providerBookId": getProviderBook,
+};
+
+async function searchBooks({ req, user }: RouteContext): Promise<Response> {
+  if (searchRateLimited(user.id)) {
+    return json({ error: "Too many book searches. Try again later." }, 429);
   }
-  const entry = searchAttempts.get(userId);
-  if (!entry || entry.resetAt <= now) {
-    searchAttempts.set(userId, { count: 1, resetAt: now + SEARCH_WINDOW_MS });
-    return false;
+
+  const body = await readJsonWithLimit<Record<string, unknown>>(req, SEARCH_BODY_LIMIT_BYTES);
+  const query = readSearchQuery(body);
+  if (!query.title && !query.author && !query.isbn) {
+    throw new ValidationError("At least one of title, author, or isbn is required");
   }
-  entry.count += 1;
-  return entry.count > SEARCH_MAX_REQUESTS;
+
+  const provider = readProvider(body);
+  const response = provider
+    ? await bookProviders.search(provider, query)
+    : { results: await bookProviders.searchAll(query), cache: "miss" as const };
+
+  return json({ ...response, providers: bookProviders.enabled() });
 }
 
-const string = (value: unknown, name: string) => boundedString(value, name, MAX_QUERY_LENGTH);
-function strings(value: unknown, name: string): string[] | undefined {
+async function getProviderBook({ user, params }: RouteContext): Promise<Response> {
+  if (searchRateLimited(user.id)) {
+    return json({ error: "Too many book lookups. Try again later." }, 429);
+  }
+
+  const provider = decodeURIComponent(params.provider);
+  const providerBookId = decodeURIComponent(params.providerBookId);
+
+  if (provider.length > ACQUISITION.MAX_PROVIDER_NAME_LENGTH) {
+    throw new ValidationError(`provider must be ${ACQUISITION.MAX_PROVIDER_NAME_LENGTH} characters or fewer`);
+  }
+  if (providerBookId.length > ACQUISITION.MAX_PROVIDER_BOOK_ID_LENGTH) {
+    throw new ValidationError(`book id must be ${ACQUISITION.MAX_PROVIDER_BOOK_ID_LENGTH} characters or fewer`);
+  }
+
+  return json(await bookProviders.getBook(provider, providerBookId));
+}
+
+function readSearchQuery(body: Record<string, unknown>): SearchQuery {
+  return {
+    title: boundedString(body.title, "title", MAX_QUERY_LENGTH),
+    author: boundedString(body.author, "author", MAX_QUERY_LENGTH),
+    isbn: boundedString(body.isbn, "isbn", MAX_QUERY_LENGTH),
+    languages: readStrings(body.languages, "languages"),
+    formats: readFormats(body.formats),
+    limit: readLimit(body.limit),
+  };
+}
+
+function readProvider(body: Record<string, unknown>): string | undefined {
+  const provider = boundedString(body.provider, "provider", MAX_QUERY_LENGTH);
+  if (provider && provider.length > ACQUISITION.MAX_PROVIDER_NAME_LENGTH) {
+    throw new ValidationError(`provider must be ${ACQUISITION.MAX_PROVIDER_NAME_LENGTH} characters or fewer`);
+  }
+  return provider;
+}
+
+function readStrings(value: unknown, name: string): string[] | undefined {
   if (value == null) return undefined;
-  if (!Array.isArray(value) || value.some((x) => typeof x !== "string" || x.length > 32)) throw new ValidationError(`${name} must be an array of short strings`);
-  return value.map((x) => x.trim()).filter(Boolean);
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || entry.length > MAX_QUERY_FIELD_LENGTH)) {
+    throw new ValidationError(`${name} must be an array of short strings`);
+  }
+  return value.map((entry) => entry.trim()).filter(Boolean);
 }
 
-export async function registerBookSearchRoutes(req: Request, path: string, user: AuthUser): Promise<Response | null> {
-  if (path === SEARCH_PATH && req.method === "POST") {
-    if (searchRateLimited(user.id)) {
-      return json({ error: "Too many book searches. Try again later." }, 429);
-    }
-    const body = await readJsonWithLimit<Record<string, unknown>>(req, 32 * 1024);
-    const query: SearchQuery = { title: string(body.title, "title"), author: string(body.author, "author"), isbn: string(body.isbn, "isbn"), languages: strings(body.languages, "languages"), formats: strings(body.formats, "formats") as BookFormat[] | undefined, limit: typeof body.limit === "number" && Number.isInteger(body.limit) && body.limit > 0 && body.limit <= 100 ? body.limit : undefined };
-    if (!query.title && !query.author && !query.isbn) throw new ValidationError("At least one of title, author, or isbn is required");
-    const provider = string(body.provider, "provider");
-    const response = provider ? await bookProviders.search(provider, query) : { results: await bookProviders.searchAll(query), cache: "miss" as const };
-    return json({ ...response, providers: bookProviders.enabled() });
+function readFormats(value: unknown): BookFormat[] | undefined {
+  const formats = readStrings(value, "formats");
+  if (formats === undefined) return undefined;
+  if (formats.some((format) => !BOOK_FORMATS.has(format))) {
+    throw new ValidationError(`formats entries must be one of: ${[...BOOK_FORMATS].join(", ")}`);
   }
-  const detail = path.match(DETAIL_RE);
-  if (detail && req.method === "GET") {
-    if (searchRateLimited(user.id)) {
-      return json({ error: "Too many book lookups. Try again later." }, 429);
-    }
-    const provider = decodeURIComponent(detail[1]);
-    const providerBookId = decodeURIComponent(detail[2]);
-    // Bound both segments: a pathologically long ID upserts a book_metadata
-    // row per unique value (slow, unbounded DB growth). Reject before lookup.
-    if (provider.length > MAX_PROVIDER_LENGTH) {
-      throw new ValidationError(`provider must be ${MAX_PROVIDER_LENGTH} characters or fewer`);
-    }
-    if (providerBookId.length > MAX_PROVIDER_BOOK_ID_LENGTH) {
-      throw new ValidationError(`book id must be ${MAX_PROVIDER_BOOK_ID_LENGTH} characters or fewer`);
-    }
-    return json(await bookProviders.getBook(provider, providerBookId));
-  }
-  return null;
+  return formats as BookFormat[];
+}
+
+function readLimit(value: unknown): number | undefined {
+  const isValid = typeof value === "number" && Number.isInteger(value) && value > 0 && value <= MAX_RESULTS;
+  return isValid ? (value as number) : undefined;
 }

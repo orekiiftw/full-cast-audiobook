@@ -26,8 +26,6 @@ export const bookMetadata = pgTable(
     providerBookId: text("provider_book_id").notNull(),
     isbn: text("isbn"),
     title: text("title").notNull(),
-    // NOTE: .default([]) on text[] breaks drizzle-kit 0.21 DDL serialization
-    // (emits "DEFAULT  NOT NULL" → syntax error on fresh db:push). SQL literal works.
     authors: text("authors")
       .array()
       .notNull()
@@ -73,7 +71,6 @@ export const sessions = pgTable(
   }),
 );
 
-// 1. Books Table
 export const books = pgTable(
   "books",
   {
@@ -84,7 +81,7 @@ export const books = pgTable(
     title: text("title").notNull(),
     author: text("author").notNull(),
     coverR2Key: text("cover_r2_key"),
-    sourceHash: text("source_hash").notNull(), // EPUB hash or Torrent hash
+    sourceHash: text("source_hash").notNull(),
     epubR2Key: text("epub_r2_key"),
     status: text("status", { enum: ["discovering", "casting", "in_progress", "ready", "failed"] })
       .notNull()
@@ -96,7 +93,6 @@ export const books = pgTable(
   }),
 );
 
-// 2. Cast Members Table
 export const castMembers = pgTable(
   "cast_members",
   {
@@ -105,7 +101,7 @@ export const castMembers = pgTable(
       .references(() => books.id, { onDelete: "cascade" })
       .notNull(),
     name: text("name").notNull(),
-    aliases: text("aliases").array().notNull(), // Aliases text[]
+    aliases: text("aliases").array().notNull(),
     importance: text("importance", { enum: ["main", "minor"] }).notNull(),
     voiceBucket: text("voice_bucket", {
       enum: ["male_young", "male_adult", "male_old", "female_young", "female_adult", "female_old"],
@@ -113,10 +109,6 @@ export const castMembers = pgTable(
     ttsVoiceName: text("tts_voice_name").notNull(),
     styleString: text("style_string").notNull(),
     pronunciationNotes: text("pronunciation_notes"),
-    // Single-narrator preview cache. Synthesizing a preview costs a paid TTS
-    // call and takes seconds; the audio for a given (voice, style) pair is
-    // deterministic enough to reuse. Guarded by previewGen so an invalidate
-    // racing an in-flight synthesis can never serve a stale clip.
     previewAudio: text("preview_audio"),
     previewVoiceKey: text("preview_voice_key"),
     previewGen: integer("preview_gen").notNull().default(0),
@@ -126,7 +118,6 @@ export const castMembers = pgTable(
   }),
 );
 
-// 3. Pronunciation Dictionary Table
 export const pronunciationDict = pgTable(
   "pronunciation_dict",
   {
@@ -142,7 +133,6 @@ export const pronunciationDict = pgTable(
   }),
 );
 
-// 4. Chapters Table
 export const chapters = pgTable(
   "chapters",
   {
@@ -159,9 +149,6 @@ export const chapters = pgTable(
       .default("queued"),
     audioR2Key: text("audio_r2_key"),
     durationMs: integer("duration_ms"),
-    // Terminal-state counters maintained atomically by the pipeline. They
-    // replace re-scanning every segment of a chapter on each completion event
-    // (previously O(segments²) row reads per chapter).
     totalCount: integer("total_count").notNull().default(0),
     voicedCount: integer("voiced_count").notNull().default(0),
     failedCount: integer("failed_count").notNull().default(0),
@@ -172,7 +159,6 @@ export const chapters = pgTable(
   }),
 );
 
-// 5. Segments Table
 export const segments = pgTable(
   "segments",
   {
@@ -182,12 +168,9 @@ export const segments = pgTable(
       .notNull(),
     segmentIndex: integer("segment_index").notNull(),
     rawText: text("raw_text").notNull(),
-    annotatedJson: jsonb("annotated_json"), // { scene_summary?, beats: [...] } or legacy beats array
+    annotatedJson: jsonb("annotated_json"),
     speakerCastId: uuid("speaker_cast_id").references(() => castMembers.id, { onDelete: "set null" }),
     audioR2Key: text("audio_r2_key"),
-    // "pending" = planned but intentionally NOT scheduled yet (lookahead window
-    // hasn't reached it); "queued" = has a BullMQ job. Plain text column, so
-    // adding a value here needs no SQL migration.
     status: text("status", {
       enum: ["pending", "queued", "processing", "annotated", "voiced", "failed"],
     })
@@ -195,20 +178,16 @@ export const segments = pgTable(
       .default("queued"),
     attempts: integer("attempts").default(0).notNull(),
     durationMs: integer("duration_ms"),
-    isSceneBreak: integer("is_scene_break").notNull().default(0), // 0/1 — scene break before this segment
-    sceneSummary: text("scene_summary"), // running summary after this segment was annotated
+    isSceneBreak: integer("is_scene_break").notNull().default(0),
+    sceneSummary: text("scene_summary"),
   },
   (t) => ({
     unqChapterSegment: unique().on(t.chapterId, t.segmentIndex),
     chapterStatus: index("segments_chapter_id_status_idx").on(t.chapterId, t.status),
-    // Status index for the queue-fill scan (WHERE status='queued'). Kept as a
-    // plain index: drizzle-kit 0.21 cannot serialize partial-index WHERE
-    // clauses and breaks db:push on them.
     statusIdx: index("segments_status_idx").on(t.status),
   }),
 );
 
-// 6. Playback State Table
 export const playbackState = pgTable(
   "playback_state",
   {

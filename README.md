@@ -26,26 +26,39 @@ Narratea is a production-ready system running on the Bun runtime that transforms
 ## Project Structure
 ```
 src/
-├── server.ts              # Bun HTTP entry: static SPA hosting + /api delegation
-├── queue.ts               # BullMQ/Redis queues, workers, job dedupe, locks, SSE event bridge
-├── orchestrator.ts        # Pipeline processors: ingestion -> annotation -> TTS -> stitch
-├── api/
-│   ├── router.ts          # Modular API router (ValidationError -> 400)
-│   ├── response.ts        # json / cors / binary response helpers
-│   └── routes/            # books, chapters, segments, audio, cast, playback, pronunciation, events (SSE)
-├── *Service.ts            # epub, torbox, segmentation, annotation, tts, stitching
-├── r2.ts                  # Cloudflare R2 storage with local ./.storage fallback
-├── schema.ts / db.ts      # Drizzle ORM schema + Postgres pool
-├── lib/                   # constants (browser-safe env access), validators,
-│                          # format helpers, voiceSegment
-│                          # (parallel beat synthesis + in-memory WAV merge),
-│                          # bookCache (per-book narrator/pronunciation cache),
-│                          # sessionHint (optimistic signed-in boot marker)
-├── hooks/                 # useSSE (auto-reconnect), useAudioPlayer
-├── components/            # Library, BookDetail, Player
-│   └── ui/                # Button, Badge, Card, Modal, Toast, ProgressBar, Skeleton, Icon
-└── types/api.ts           # Shared API/domain types
+├── server.ts  main.tsx     # Bun HTTP entry, static SPA hosting + /api delegation; browser entry
+├── db.ts  schema.ts        # Postgres pool + Drizzle ORM schema
+├── queue/                  # BullMQ/Redis: connection, queues, enqueue, workers, events, locks
+├── auth.ts  environment.ts  staticFiles.ts
+├── api/                    # HTTP layer
+│   ├── route.ts  router.ts  csrf.ts  errors.ts  rateLimit.ts
+│   ├── response.ts  body.ts  ownership.ts
+│   └── routes/             # books, chapters, segments, audio, cast, playback, pronunciation, events (SSE)
+├── acquisition/            # Finding and fetching EPUBs
+│   ├── index.ts  types.ts  errors.ts  registry.ts  ranking.ts  catalogue.ts
+│   └── providers/          # One file per source: archiveOrg, gutenberg, libgen, annaArchive, torrent
+├── torrent/                # TorBox API + fallback indexers, ranking, SSRF guards, torrent/IPFS downloads
+├── epub/                   # EPUB parsing: archive guards, OPF metadata, spine, chapters, filters, text
+├── narration/              # Text -> performance
+│   ├── annotation/         # Emotional-beat direction via Gemini (prompt, response, beats)
+│   ├── tts/                # Speech synthesis: MiMo + Sarvam providers, retries, rate limiting
+│   ├── voiceSegment.ts     # Parallel beat synthesis + in-memory WAV merge
+│   ├── voiceContext.ts     # Per-book narrator/pronunciation cache
+│   └── segmenter.ts        # Chapter -> narration segment splitting
+├── audio/                  # WAV math (wav.ts), chapter stitching (stitch.ts), ffmpeg process handling
+├── storage/                # Cloudflare R2 with local ./.storage fallback (r2/, keys.ts)
+├── orchestrator/           # Background pipeline: ingestion/ and segment/ phases, stitch, sweep, recovery
+├── lib/                    # Shared helpers: constants, api client, format, language, readStream, validators
+├── hooks/                  # useSSE, useAuthSession, usePlaybackSession, useSleepTimer, useAudioPlayer
+├── components/             # Screens (App-level): Player, BookDetail, Library, AuthScreen
+│   ├── player/             # Transport controls, transcript, playback hooks
+│   ├── bookDetail/         # Chapter list, narrator card, pronunciation editor
+│   ├── library/  auth/     # Library and auth screen pieces
+│   └── ui/                 # Button, Badge, Card, Modal, Toast, ProgressBar, Skeleton, Icon
+└── types/api.ts            # Shared API/domain types
 ```
+
+Rationale that used to live in code comments is collected in [`docs/notes/`](docs/notes).
 
 ### Installing FFmpeg
 
@@ -81,7 +94,7 @@ Ensure you configure:
 - `GEMINI_API_KEY`: API credentials from Google AI Studio (used for emotional beat annotation).
 - `MIMO_API_KEY`: API key from the [Xiaomi MiMo console](https://platform.xiaomimimo.com/console/api-keys) (used for TTS synthesis — see the [MiMo speech synthesis docs](https://mimo.mi.com/docs/usage-guide/speech-synthesis-v2.5)). `MIMO_TS_MODEL` (default `mimo-v2.5-tts`) and `MIMO_TS_BASE_URL` (default `https://api.xiaomimimo.com/v1`) are optional overrides; set `MIMO_TS_MODEL=mimo-v2.5-tts-voicedesign` to narrate with a voice described in natural language instead of a built-in voice.
 - `TORBOX_API_KEY`: API credentials from TorBox (required for torrent caching/downloads).
-- `BOOK_PROVIDERS_ENABLED`: Comma-separated reviewed acquisition providers (default: `torrent`). `anna-archive` is deliberately disabled until a vetted sidecar adapter replaces its fail-closed stub; see [`docs/acquisition-architecture.md`](docs/acquisition-architecture.md).
+- `BOOK_PROVIDERS_ENABLED`: Comma-separated reviewed acquisition providers (default: `torrent,archive-org`). `anna-archive` is deliberately disabled until a vetted sidecar adapter replaces its fail-closed stub; see [`docs/acquisition-architecture.md`](docs/acquisition-architecture.md).
 - `BOOK_SEARCH_CACHE_TTL_MS`, `BOOK_SEARCH_MAX_RESULTS`, `PREFERRED_LANGUAGES`, and `PREFERRED_FORMATS`: Provider-search cache and ranking policy controls.
 - `R2_*`: Cloudflare R2 storage credentials (optional; the app falls back to local `./.storage/` folder if unset).
 - `HOST` / `PORT`: Bind address (default `127.0.0.1:3000`). Keep it on loopback unless you're ready to expose it; the API requires an authenticated session cookie (email + password signup/login stored in a same-origin HttpOnly cookie).

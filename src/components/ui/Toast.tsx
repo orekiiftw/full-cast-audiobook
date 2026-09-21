@@ -34,9 +34,6 @@ export function ToastProvider({ children }: ToastProviderProps) {
     }, 4000);
   }, []);
 
-  // Memoized: without this, every toast (appear + auto-dismiss) created a new
-  // context value and re-rendered EVERY useToast consumer — App, Library,
-  // BookDetail, and the whole Player including its memoized transcript rows.
   const value = useMemo(() => ({ showToast }), [showToast]);
 
   return (

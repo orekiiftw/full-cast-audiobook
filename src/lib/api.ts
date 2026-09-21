@@ -6,18 +6,17 @@ interface ApiFetchOptions {
   notifyOnUnauthorized?: boolean;
 }
 
-/**
- * Same-origin API wrapper. Cookies are included explicitly and any protected
- * request that loses its session tells the root auth gate to reset the app.
- */
+type ShowToast = (message: string, tone?: "info" | "error") => void;
+
 export async function apiFetch(
   input: RequestInfo | URL,
   init: RequestInit = {},
-  { notifyOnUnauthorized = true }: ApiFetchOptions = {}
+  { notifyOnUnauthorized = true }: ApiFetchOptions = {},
 ): Promise<Response> {
   const requestInit: RequestInit = {
     ...init,
     credentials: init.credentials ?? "same-origin",
+    signal: init.signal ?? AbortSignal.timeout(30_000),
   };
   const response = await fetch(input, requestInit);
 
@@ -34,25 +33,18 @@ export function authUserFromResponse(payload: AuthResponse | AuthUser): AuthUser
   return candidate;
 }
 
-type ShowToast = (message: string, tone?: "info" | "error") => void;
-
-/** Standard handling for catch blocks around apiFetch: log for the console, toast for the user. */
 export function reportNetworkError(err: unknown, showToast: ShowToast): void {
   console.error(err);
   showToast("Network error occurred.", "error");
 }
 
-/**
- * Confirm + DELETE /api/books/:id + toast, shared by the library card and the
- * detail view. Resolves true only when the book was actually deleted.
- */
 export async function deleteBook(bookId: string, title: string, showToast: ShowToast): Promise<boolean> {
   if (!window.confirm(`Delete "${title}" from your library?`)) return false;
   try {
     const res = await apiFetch(`/api/books/${bookId}`, { method: "DELETE" });
     if (!res.ok) {
-      const body = (await res.json()) as { error?: string };
-      showToast(body.error || "Failed to delete book.", "error");
+      const body = await readErrorPayload(res);
+      showToast(body?.error || "Failed to delete book.", "error");
       return false;
     }
     showToast("Book deleted.");
@@ -63,17 +55,17 @@ export async function deleteBook(bookId: string, title: string, showToast: ShowT
   }
 }
 
-/** Only display plain, bounded backend error strings; never render server markup. */
-export async function safeApiError(
-  response: Response,
-  fallback = "Something went wrong. Please try again."
-): Promise<string> {
+export async function safeApiError(response: Response, fallback = "Something went wrong. Please try again."): Promise<string> {
+  const payload = await readErrorPayload(response);
+  if (typeof payload?.error !== "string") return fallback;
+  const message = payload.error.replace(/[<>]/g, "").trim();
+  return message ? message.slice(0, 240) : fallback;
+}
+
+async function readErrorPayload(response: Response): Promise<Partial<ApiError> | null> {
   try {
-    const payload = (await response.json()) as Partial<ApiError>;
-    if (typeof payload.error !== "string") return fallback;
-    const message = payload.error.replace(/[<>]/g, "").trim();
-    return message ? message.slice(0, 240) : fallback;
+    return (await response.json()) as Partial<ApiError>;
   } catch {
-    return fallback;
+    return null;
   }
 }

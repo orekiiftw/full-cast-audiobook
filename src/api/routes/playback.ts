@@ -1,25 +1,54 @@
 import { db } from "../../db";
 import { playbackState } from "../../schema";
-import { ensureChapterLookahead } from "../../orchestrator";
+import { ensureChapterLookahead, ensureLookahead } from "../../orchestrator";
 import { json } from "../response";
-import { readJsonWithLimit, requireNumber, requireUuid, ValidationError } from "../../lib/validators";
-import { AuthUser } from "../../auth";
+import { type RouteContext, type RouteTable } from "../route";
+import { ValidationError, requireNumber, requireUuid } from "../../lib/validators";
+import { readJsonWithLimit } from "../body";
 import { ownedBook, ownedChapter } from "../ownership";
 
-// Sanity cap: seek positions beyond a week are clearly corrupt
 const MAX_POSITION_MS = 7 * 24 * 60 * 60 * 1000;
 
-export async function registerPlaybackRoutes(req: Request, path: string, user: AuthUser): Promise<Response | null> {
-  if (path !== "/api/playback" || req.method !== "PUT") {
-    return null;
+export const playbackRoutes: RouteTable = {
+  "PUT /api/playback": syncPlayback,
+};
+
+interface PlaybackPayload {
+  bookId: string;
+  chapterId: string;
+  positionMs: number;
+  segmentIndex?: number;
+}
+
+async function syncPlayback({ req, user }: RouteContext): Promise<Response> {
+  const payload = await readPlaybackPayload(req);
+
+  const [book, chapter] = await Promise.all([ownedBook(user.id, payload.bookId), ownedChapter(user.id, payload.chapterId)]);
+  if (!book || !chapter || chapter.chapter.bookId !== payload.bookId) {
+    return json({ error: "Book or chapter not found" }, 404);
   }
 
+  await storePlaybackPosition(payload);
+
+  const chapterIndex = chapter.chapter.chapterIndex;
+  ensureChapterLookahead(payload.bookId, chapterIndex).catch((err) =>
+    console.error(`Lookahead ensure failed for book ${payload.bookId} ch ${chapterIndex}:`, err),
+  );
+
+  if (payload.segmentIndex !== undefined) {
+    ensureLookahead(payload.bookId, { chapterIndex, segmentIndex: payload.segmentIndex }).catch((err) =>
+      console.error(`Lookahead re-center failed for book ${payload.bookId} ch ${chapterIndex} seg ${payload.segmentIndex}:`, err),
+    );
+  }
+
+  return json({ success: true });
+}
+
+async function readPlaybackPayload(req: Request): Promise<PlaybackPayload> {
   const body = (await readJsonWithLimit(req)) as Record<string, unknown>;
   const bookId = requireUuid(body.bookId, "bookId");
   const chapterId = requireUuid(body.chapterId, "chapterId");
   const positionMs = requireNumber(body, "positionMs");
-  // Optional 1-based index of the line currently playing — the lookahead
-  // window re-centers on it so voicing stays just ahead of the listener.
   const segmentIndex = body.segmentIndex === undefined ? undefined : requireNumber(body, "segmentIndex");
 
   if (!Number.isFinite(positionMs) || positionMs < 0 || positionMs > MAX_POSITION_MS) {
@@ -29,34 +58,25 @@ export async function registerPlaybackRoutes(req: Request, path: string, user: A
     throw new ValidationError("Field segmentIndex must be a positive integer");
   }
 
-  const [book, chapter] = await Promise.all([ownedBook(user.id, bookId), ownedChapter(user.id, chapterId)]);
-  if (!book || !chapter || chapter.chapter.bookId !== bookId) {
-    return json({ error: "Book or chapter not found" }, 404);
-  }
+  return { bookId, chapterId, positionMs, segmentIndex };
+}
 
-  // Atomic upsert — the previous select-then-insert raced concurrent syncs
-  // and died on the (book_id, chapter_id) unique constraint.
+async function storePlaybackPosition({ bookId, chapterId, positionMs }: PlaybackPayload): Promise<void> {
+  const rounded = Math.round(positionMs);
+
   await db
     .insert(playbackState)
     .values({
       bookId,
       chapterId,
-      positionMs: Math.round(positionMs),
+      positionMs: rounded,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
       target: [playbackState.bookId, playbackState.chapterId],
       set: {
-        positionMs: Math.round(positionMs),
+        positionMs: rounded,
         updatedAt: new Date(),
       },
     });
-
-  // Transcribe the current chapter fully + the next chapter so playback is
-  // uninterrupted and the next chapter is ready when the listener reaches it.
-  // Nothing beyond N+1 is scheduled until the listener advances, capping TTS
-  // spend at two chapters ahead. (fire-and-forget — sync must not wait on it.)
-  ensureChapterLookahead(bookId, chapter.chapter.chapterIndex).catch(console.error);
-
-  return json({ success: true });
 }

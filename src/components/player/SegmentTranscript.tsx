@@ -1,5 +1,5 @@
-import { memo } from "react";
-import { Icon } from "../ui/Icon";
+import { memo, useCallback, useEffect, useRef } from "react";
+import { Icon } from "../ui";
 import { isPendingStatus, isPlayableSegment } from "../../lib/segmentStatus";
 import type { Segment } from "../../types/api";
 
@@ -12,29 +12,14 @@ interface SegmentRowProps {
   registerRef: (id: string, el: HTMLDivElement | null) => void;
 }
 
-/**
- * Memoized so playback position ticks (~1/sec) don't re-render the whole
- * transcript — only rows whose own props changed (active line, fresh status).
- */
-const SegmentRow = memo(function SegmentRow({
-  seg,
-  index,
-  isActive,
-  onSelect,
-  onRedo,
-  registerRef,
-}: SegmentRowProps) {
+const SegmentRow = memo(function SegmentRow({ seg, index, isActive, onSelect, onRedo, registerRef }: SegmentRowProps) {
   const playable = isPlayableSegment(seg);
   return (
     <div
       ref={(el) => registerRef(seg.id, el)}
       onClick={() => playable && onSelect(index)}
-      className={`group relative rounded-xl p-4 transition-all duration-300 ${
-        playable ? "cursor-pointer" : ""
-      } ${
-        isActive
-          ? "bg-gold-500/[0.07] border border-gold-500/20 shadow-glow-soft"
-          : "border border-transparent hover:bg-white/[0.02]"
+      className={`group relative rounded-xl p-4 transition-all duration-300 ${playable ? "cursor-pointer" : ""} ${
+        isActive ? "bg-gold-500/[0.07] border border-gold-500/20 shadow-glow-soft" : "border border-transparent hover:bg-white/[0.02]"
       }`}
     >
       <p
@@ -73,16 +58,22 @@ interface SegmentTranscriptProps {
   currentSegmentIndex: number;
   onSegmentSelect: (idx: number) => void;
   onSegmentRedo: (segId: string) => void;
-  registerSegmentRef: (id: string, el: HTMLDivElement | null) => void;
 }
 
-export default function SegmentTranscript({
-  segmentsList,
-  currentSegmentIndex,
-  onSegmentSelect,
-  onSegmentRedo,
-  registerSegmentRef,
-}: SegmentTranscriptProps) {
+export function SegmentTranscript({ segmentsList, currentSegmentIndex, onSegmentSelect, onSegmentRedo }: SegmentTranscriptProps) {
+  const rowElementsRef = useRef(new Map<string, HTMLDivElement>());
+
+  const registerRowRef = useCallback((id: string, element: HTMLDivElement | null) => {
+    if (element) rowElementsRef.current.set(id, element);
+    else rowElementsRef.current.delete(id);
+  }, []);
+
+  useEffect(() => {
+    const activeSegment = segmentsList[currentSegmentIndex];
+    if (!activeSegment) return;
+    rowElementsRef.current.get(activeSegment.id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [currentSegmentIndex]);
+
   return (
     <div className="flex-1 overflow-y-auto mb-5 rounded-2xl border border-white/[0.05] bg-cinema-950/40 p-4 sm:p-6">
       <div className="max-w-2xl mx-auto space-y-3">
@@ -94,7 +85,7 @@ export default function SegmentTranscript({
             isActive={currentSegmentIndex === idx}
             onSelect={onSegmentSelect}
             onRedo={onSegmentRedo}
-            registerRef={registerSegmentRef}
+            registerRef={registerRowRef}
           />
         ))}
       </div>

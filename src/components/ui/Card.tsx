@@ -25,8 +25,7 @@ export function Card({ children, className = "", onClick, isInteractive = false 
       }
       className={[
         "rounded-2xl border border-white/[0.06] bg-cinema-900/50 backdrop-blur-sm shadow-card",
-        isInteractive &&
-          "transition-all duration-300 ease-out-expo hover:border-white/[0.1] hover:bg-cinema-850/70 hover:shadow-elevated",
+        isInteractive && "transition-all duration-300 ease-out-expo hover:border-white/[0.1] hover:bg-cinema-850/70 hover:shadow-elevated",
         onClick && isInteractive && "cursor-pointer",
         className,
       ].join(" ")}

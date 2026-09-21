@@ -18,7 +18,8 @@ mock.module("../../db", () => ({
   pool: { connect: async () => ({ release: () => {} }), on: () => {} },
 }));
 
-import { registerBookSearchRoutes } from "./bookSearch";
+import { bookSearchRoutes } from "./bookSearch";
+import { dispatchRoute } from "../route";
 import { AuthUser } from "../../auth";
 
 const testUser: AuthUser = {
@@ -26,7 +27,7 @@ const testUser: AuthUser = {
   email: "test@example.com",
 };
 
-describe("registerBookSearchRoutes", () => {
+describe("book search routes", () => {
   it("searches enabled providers and returns results", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = mock(async (url: string | URL | Request) => {
@@ -58,11 +59,10 @@ describe("registerBookSearchRoutes", () => {
         body: JSON.stringify({ title: "Godan", author: "Premchand", provider: "archive-org" }),
       });
 
-      const res = await registerBookSearchRoutes(req, "/api/book-search", testUser);
-      expect(res).not.toBeNull();
-      expect(res!.status).toBe(200);
+      const res = await dispatchRoute(bookSearchRoutes, req, testUser);
+      expect(res.status).toBe(200);
 
-      const data = await res!.json();
+      const data = await res.json();
       expect(data.results).toHaveLength(1);
       expect(data.results[0].id).toBe("godan-archive-test");
       expect(data.results[0].provider).toBe("archive-org");
@@ -97,11 +97,10 @@ describe("registerBookSearchRoutes", () => {
         method: "GET",
       });
 
-      const res = await registerBookSearchRoutes(req, "/api/book-search/archive-org/godan-archive-test", testUser);
-      expect(res).not.toBeNull();
-      expect(res!.status).toBe(200);
+      const res = await dispatchRoute(bookSearchRoutes, req, testUser);
+      expect(res.status).toBe(200);
 
-      const data = await res!.json();
+      const data = await res.json();
       expect(data.id).toBe("godan-archive-test");
       expect(data.provider).toBe("archive-org");
       expect(data.title).toBe("Godan");

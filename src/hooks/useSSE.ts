@@ -5,12 +5,23 @@ import type { PipelineEvent } from "../types/api";
 interface UseSSEOptions {
   onEvent: (event: PipelineEvent) => void;
   onError?: (error: Event) => void;
-  /**
-   * Fired after a reconnect (never on the initial connection). Consumers use
-   * it to refetch state: events emitted during the outage gap are lost, and
-   * SSE-only views (e.g. BookDetail) would otherwise stay stale indefinitely.
-   */
   onReconnect?: () => void;
+}
+
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 30000;
+
+function reconnectDelayMs(attempt: number): number {
+  return Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** attempt);
+}
+
+async function sessionSurvivedInterrupt(): Promise<boolean> {
+  try {
+    const response = await apiFetch("/api/auth/me", { method: "GET" });
+    return response.status !== 401;
+  } catch {
+    return true;
+  }
 }
 
 export function useSSE(url: string, { onEvent, onError, onReconnect }: UseSSEOptions) {
@@ -46,9 +57,15 @@ export function useSSE(url: string, { onEvent, onError, onReconnect }: UseSSEOpt
     if (stoppedRef.current) return;
     sourceRef.current?.close();
 
-    // Native EventSource sends same-origin cookies automatically.
     const source = new EventSource(url);
     sourceRef.current = source;
+
+    const scheduleReconnect = () => {
+      if (stoppedRef.current) return;
+      const retryDelay = reconnectDelayMs(retryCountRef.current);
+      retryCountRef.current += 1;
+      reconnectTimeoutRef.current = window.setTimeout(connect, retryDelay);
+    };
 
     source.onopen = () => {
       const wasReconnect = retryCountRef.current > 0;
@@ -65,27 +82,17 @@ export function useSSE(url: string, { onEvent, onError, onReconnect }: UseSSEOpt
       }
     };
 
+    const handleInterrupt = async () => {
+      if (await sessionSurvivedInterrupt()) scheduleReconnect();
+    };
+
     source.onerror = (error) => {
       onErrorRef.current?.(error);
       source.close();
       if (sourceRef.current === source) sourceRef.current = null;
       if (stoppedRef.current) return;
 
-      // EventSource does not expose the HTTP status. Probe the auth endpoint
-      // before reconnecting so a 401 ends the stream instead of retrying forever.
-      void apiFetch("/api/auth/me", { method: "GET" })
-        .then((response) => {
-          if (stoppedRef.current || response.status === 401) return;
-          const retryDelay = Math.min(30000, 1000 * Math.pow(2, retryCountRef.current));
-          retryCountRef.current += 1;
-          reconnectTimeoutRef.current = window.setTimeout(connect, retryDelay);
-        })
-        .catch(() => {
-          if (stoppedRef.current) return;
-          const retryDelay = Math.min(30000, 1000 * Math.pow(2, retryCountRef.current));
-          retryCountRef.current += 1;
-          reconnectTimeoutRef.current = window.setTimeout(connect, retryDelay);
-        });
+      void handleInterrupt();
     };
   }, [url]);
 

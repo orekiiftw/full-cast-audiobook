@@ -1,102 +1,111 @@
-import { pipelineEvents } from "../../orchestrator";
+import { pipelineEvents } from "../../queue";
+import { corsHeaders, json } from "../response";
+import { type RouteContext, type RouteTable } from "../route";
 import { requireUuid } from "../../lib/validators";
-import { AuthUser } from "../../auth";
 import { ownedBook } from "../ownership";
-import { json, corsHeadersForResponse } from "../response";
 
-const EVENTS_RE = /^\/api\/books\/([a-f0-9-]+)\/events$/i;
 const HEARTBEAT_INTERVAL_MS = 15_000;
-/** Caps concurrent SSE streams per user to prevent listener/timer exhaustion. */
 const MAX_SSE_PER_USER = 8;
-const activeSseByUser = new Map<string, number>();
 
-export async function registerEventRoutes(req: Request, path: string, user: AuthUser): Promise<Response | null> {
-  const match = path.match(EVENTS_RE);
-  if (!match || req.method !== "GET") {
-    return null;
-  }
+const activeStreamsByUser = new Map<string, number>();
 
-  const bookId = requireUuid(match[1], "bookId");
-  // Authorize before constructing the stream, registering listeners, or waking workers.
+export const eventRoutes: RouteTable = {
+  "GET /api/books/:bookId/events": streamBookEvents,
+};
+
+async function streamBookEvents({ req, user, params }: RouteContext): Promise<Response> {
+  const bookId = requireUuid(params.bookId, "bookId");
   if (!(await ownedBook(user.id, bookId))) return json({ error: "Book not found" }, 404);
 
-  // Bound concurrent streams per user so a single account can't exhaust
-  // EventEmitter listeners / timers by opening unclosed connections.
-  const open = activeSseByUser.get(user.id) ?? 0;
-  if (open >= MAX_SSE_PER_USER) {
+  if (!openStreamSlot(user.id)) {
     return json({ error: "Too many live event connections. Close one and try again." }, 429);
   }
-  activeSseByUser.set(user.id, open + 1);
 
-  // Idempotent teardown — assigned synchronously by start() below. Bound to
-  // BOTH the request abort signal and the stream's cancel() callback so the
-  // pipelineEvents listener is always removed exactly once, even if one of
-  // the two disconnect hooks is missed by the runtime.
-  let cleanup: () => void = () => {};
-
-  const stream = new ReadableStream({
-    start(controller) {
-      const encoder = new TextEncoder();
-      const safeEnqueue = (chunk: string): boolean => {
-        try {
-          controller.enqueue(encoder.encode(chunk));
-          return true;
-        } catch {
-          return false; // controller already closed
-        }
-      };
-
-      safeEnqueue("retry: 10000\n\n");
-
-      const handler = (event: { bookId?: string }) => {
-        if (event.bookId === bookId) {
-          safeEnqueue(`data: ${JSON.stringify(event)}\n\n`);
-        }
-      };
-
-      pipelineEvents.on("progress", handler);
-
-      let cleanedUp = false;
-      cleanup = () => {
-        if (cleanedUp) return;
-        cleanedUp = true;
-        clearInterval(heartbeat);
-        pipelineEvents.off("progress", handler);
-        // Release this user's connection slot so a new stream can open.
-        const remaining = (activeSseByUser.get(user.id) ?? 1) - 1;
-        if (remaining <= 0) activeSseByUser.delete(user.id);
-        else activeSseByUser.set(user.id, remaining);
-        try {
-          controller.close();
-        } catch {
-          // already closed
-        }
-      };
-
-      const heartbeat = setInterval(() => {
-        if (!safeEnqueue(": heartbeat\n\n")) {
-          cleanup();
-        }
-      }, HEARTBEAT_INTERVAL_MS);
-
-      // Client disconnected (tab closed, fetch aborted, socket dropped)
-      req.signal.addEventListener("abort", cleanup, { once: true });
-    },
-    cancel() {
-      // Stream torn down without the abort signal firing
-      cleanup();
-    },
-  });
-
-  return new Response(stream, {
+  return new Response(createBookEventStream(req, user.id, bookId), {
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
       "X-Content-Type-Options": "nosniff",
-      // SSE must carry the same CORS headers as JSON responses or an
-      // external-origin SPA (CORS_ORIGIN) can call the API but never stream.
-      ...corsHeadersForResponse(),
+      ...corsHeaders(),
     },
   });
+}
+
+function createBookEventStream(req: Request, userId: string, bookId: string): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  let stop: () => void = () => {};
+
+  return new ReadableStream({
+    start(controller) {
+      stop = startEventPump(req, controller, encoder, userId, bookId);
+    },
+    cancel() {
+      stop();
+    },
+  });
+}
+
+function startEventPump(
+  req: Request,
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  encoder: TextEncoder,
+  userId: string,
+  bookId: string,
+): () => void {
+  const send = (chunk: string): boolean => {
+    try {
+      controller.enqueue(encoder.encode(chunk));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const forwardProgress = (event: { bookId?: string }) => {
+    if (event.bookId === bookId) {
+      send(`data: ${JSON.stringify(event)}\n\n`);
+    }
+  };
+
+  send("retry: 10000\n\n");
+  pipelineEvents.on("progress", forwardProgress);
+
+  let cleanedUp = false;
+  let heartbeat: ReturnType<typeof setInterval>;
+
+  const stop = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    clearInterval(heartbeat);
+    pipelineEvents.off("progress", forwardProgress);
+    closeStreamSlot(userId);
+    try {
+      controller.close();
+    } catch {}
+  };
+
+  heartbeat = setInterval(() => {
+    if (!send(": heartbeat\n\n")) {
+      stop();
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+
+  if (req.signal.aborted) stop();
+  else req.signal.addEventListener("abort", stop, { once: true });
+
+  return stop;
+}
+
+function openStreamSlot(userId: string): boolean {
+  const openStreams = activeStreamsByUser.get(userId) ?? 0;
+  if (openStreams >= MAX_SSE_PER_USER) return false;
+  activeStreamsByUser.set(userId, openStreams + 1);
+  return true;
+}
+
+function closeStreamSlot(userId: string): void {
+  const remaining = (activeStreamsByUser.get(userId) ?? 1) - 1;
+  if (remaining <= 0) activeStreamsByUser.delete(userId);
+  else activeStreamsByUser.set(userId, remaining);
 }

@@ -29,7 +29,7 @@ The registry owns provider selection, search caching, ranking, and metadata cach
 ## Modules
 
 - `src/acquisition/types.ts` — stable provider-neutral contracts.
-- `src/acquisition/providers.ts` — provider adapters. `TorrentProvider` wraps the existing TorBox workflow; `AnnaArchiveProvider` is explicitly disabled until a vetted sidecar adapter exists.
+- `src/acquisition/providers/index.ts` — provider adapters. `TorrentProvider` wraps the existing TorBox workflow; `AnnaArchiveProvider` is explicitly disabled until a vetted sidecar adapter exists.
 - `src/acquisition/registry.ts` — registration, discovery, cache access, metadata persistence, and structured search logging.
 - `src/acquisition/ranking.ts` — configurable weighted ranking.
 - `src/acquisition/errors.ts` — typed acquisition errors and retry helper.

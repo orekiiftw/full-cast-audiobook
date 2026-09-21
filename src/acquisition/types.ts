@@ -31,7 +31,6 @@ export interface BookResult {
   cover?: string;
   rating?: number;
   mirrors: BookMirror[];
-  /** Configurable ranking score; absent before the registry ranks a result. */
   score?: number;
 }
 

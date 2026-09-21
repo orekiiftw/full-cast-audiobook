@@ -101,6 +101,8 @@ export interface SegmentReadyEvent extends PipelineEventBase {
   segmentId: string;
   segmentIndex: number;
   audioR2Key: string;
+  audioUrl: string;
+  durationMs: number;
   done: number;
   total: number;
   voicedCount: number;
@@ -123,10 +125,6 @@ export interface ProgressLogEvent extends PipelineEventBase {
   message: string;
 }
 
-/**
- * Discriminated on `type` — consumers narrow to the exact payload shape, so a
- * typo'd property is a compile error instead of a silent `undefined`.
- */
 export type PipelineEvent =
   StatusChangeEvent | ChapterStatusEvent | SegmentReadyEvent | SegmentFailedEvent | QuotaExceededEvent | ProgressLogEvent;
 

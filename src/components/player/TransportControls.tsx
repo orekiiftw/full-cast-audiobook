@@ -1,4 +1,4 @@
-import { Icon } from "../ui/Icon";
+import { Icon } from "../ui";
 
 export type TransportControlsVariant = "collapsed" | "expanded";
 
@@ -10,8 +10,12 @@ interface TransportControlsProps {
   goToNext: () => void;
   togglePlayPause: () => void;
   isPlaying: boolean;
-  transportButton: string;
 }
+
+export type PlayerTransportControls = Omit<TransportControlsProps, "variant">;
+
+const TRANSPORT_BUTTON_CLASS =
+  "text-cinema-400 hover:text-white disabled:opacity-25 disabled:cursor-not-allowed transition-colors duration-200 p-2.5 -m-1 rounded-full";
 
 export function TransportControls({
   variant,
@@ -21,7 +25,6 @@ export function TransportControls({
   goToNext,
   togglePlayPause,
   isPlaying,
-  transportButton,
 }: TransportControlsProps) {
   const iconSize = variant === "collapsed" ? 20 : 22;
   const playBtnSize = variant === "collapsed" ? "w-12 h-12" : "w-14 h-14";
@@ -29,7 +32,7 @@ export function TransportControls({
 
   return (
     <>
-      <button disabled={!canGoPrev} onClick={goToPrev} className={transportButton} aria-label="Previous segment">
+      <button disabled={!canGoPrev} onClick={goToPrev} className={TRANSPORT_BUTTON_CLASS} aria-label="Previous segment">
         <Icon name="skipBack" size={iconSize} />
       </button>
       <button
@@ -39,7 +42,7 @@ export function TransportControls({
       >
         <Icon name={isPlaying ? "pause" : "play"} size={iconSize} />
       </button>
-      <button disabled={!canGoNext} onClick={goToNext} className={transportButton} aria-label="Next segment">
+      <button disabled={!canGoNext} onClick={goToNext} className={TRANSPORT_BUTTON_CLASS} aria-label="Next segment">
         <Icon name="skipForward" size={iconSize} />
       </button>
     </>

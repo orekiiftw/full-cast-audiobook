@@ -7,14 +7,6 @@ interface ProgressBarProps {
   className?: string;
 }
 
-/**
- * Seekable progress track.
- * - Pointer Events (mouse + touch + pen) with pointer capture for drag scrubbing.
- * - The bar previews locally while dragging and only commits the seek on release,
- *   so scrubbing doesn't thrash audio loads across segment boundaries.
- * - The hit area is padded (py-2.5 => ~24px) so it's grabbable on touch screens
- *   while the visual track stays hairline-thin.
- */
 export function ProgressBar({ progress, buffered = 0, onSeek, className = "" }: ProgressBarProps) {
   const safeProgress = Math.max(0, Math.min(100, progress));
   const safeBuffered = Math.max(0, Math.min(100, buffered));
@@ -57,11 +49,7 @@ export function ProgressBar({ progress, buffered = 0, onSeek, className = "" }: 
       onPointerMove={handlePointerMove}
       onPointerUp={finishDrag}
       onPointerCancel={finishDrag}
-      className={[
-        "group relative w-full select-none py-2.5",
-        interactive ? "cursor-pointer touch-none" : "",
-        className,
-      ].join(" ")}
+      className={["group relative w-full select-none py-2.5", interactive ? "cursor-pointer touch-none" : "", className].join(" ")}
       role="slider"
       aria-label="Seek"
       aria-valuenow={Math.round(displayProgress)}
@@ -73,10 +61,7 @@ export function ProgressBar({ progress, buffered = 0, onSeek, className = "" }: 
           dragRatio !== null ? "h-2" : "h-1 group-hover:h-1.5"
         }`}
       >
-        <div
-          className="absolute inset-y-0 left-0 rounded-full bg-white/10"
-          style={{ width: `${safeBuffered}%` }}
-        />
+        <div className="absolute inset-y-0 left-0 rounded-full bg-white/10" style={{ width: `${safeBuffered}%` }} />
         <div
           className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-gold-500 to-gold-300 shadow-glow-sm"
           style={{ width: `${displayProgress}%` }}

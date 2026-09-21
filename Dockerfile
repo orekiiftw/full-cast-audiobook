@@ -25,7 +25,7 @@ ENV HOST=0.0.0.0 \
     NODE_ENV=production
 EXPOSE 3000
 
-# Boot: push the schema (idempotent on a fresh DB), then start the server.
-# If the database isn't reachable yet the process exits and Railway's
-# restart policy retries.
-CMD ["sh", "-c", "bun run db:push && bun run src/server.ts"]
+# Boot: apply migrations (generated via `bun run db:generate`), then start the server.
+# `drizzle-kit push` is for local dev only — it is interactive and can be destructive.
+# If the database isn't reachable yet the process exits and Railway's restart policy retries.
+CMD ["sh", "-c", "bunx drizzle-kit migrate && bun run src/server.ts"]
