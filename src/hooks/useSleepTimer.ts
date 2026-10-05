@@ -9,14 +9,6 @@ export interface SleepTimer {
   setSleepTimeLeft: (seconds: number | null) => void;
 }
 
-function deadlineFromSeconds(seconds: number | null, now: number): number | null {
-  return seconds === null ? null : now + seconds * 1000;
-}
-
-function secondsUntilDeadline(deadline: number | null, now: number): number | null {
-  return deadline === null ? null : Math.max(0, Math.ceil((deadline - now) / 1000));
-}
-
 export function useSleepTimer(setIsPlaying: (playing: boolean) => void, isPlaying: boolean): SleepTimer {
   const [sleepPreset, setSleepPresetState] = useState<number | null>(null);
   const [sleepTimeLeft, setSleepTimeLeftState] = useState<number | null>(null);
@@ -60,4 +52,12 @@ export function useSleepTimer(setIsPlaying: (playing: boolean) => void, isPlayin
   }, [sleepTimeLeft, isPlaying, setIsPlaying]);
 
   return { sleepPreset, setSleepPreset, sleepTimeLeft, setSleepTimeLeft };
+}
+
+function deadlineFromSeconds(seconds: number | null, now: number): number | null {
+  return seconds === null ? null : now + seconds * 1000;
+}
+
+function secondsUntilDeadline(deadline: number | null, now: number): number | null {
+  return deadline === null ? null : Math.max(0, Math.ceil((deadline - now) / 1000));
 }

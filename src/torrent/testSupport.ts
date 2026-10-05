@@ -1,9 +1,11 @@
 import { mock } from "bun:test";
 
 export const ZIP_BUFFER = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00]);
+
 export const VALID_CID = "bafybeigdyrzt5sfp7udm7uh76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
 
 const originalFetch = globalThis.fetch;
+
 const originalTorBoxApiKey = process.env.TORBOX_API_KEY;
 
 export function zipResponse(): Response {

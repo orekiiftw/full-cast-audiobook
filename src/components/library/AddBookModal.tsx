@@ -2,6 +2,22 @@ import { Button, Icon, Modal } from "../ui";
 import { ADD_MODES, type AddBookValues, type AddMode } from "./addBook";
 import type { AddBookFormModel } from "./useAddBookForm";
 
+export function AddBookModal({ form }: { form: AddBookFormModel }) {
+  return (
+    <Modal isOpen={form.isModalOpen} onClose={form.close} title="Add a book">
+      <AddBookModeTabs mode={form.mode} onSelect={form.selectMode} />
+
+      <form onSubmit={form.submit} className="space-y-4 pt-1">
+        <AddBookFields mode={form.mode} values={form.values} onChange={form.updateValues} />
+
+        <Button type="submit" variant="primary" isLoading={form.submitting} className="w-full !mt-6">
+          {form.submitting ? "Queuing…" : "Start performance"}
+        </Button>
+      </form>
+    </Modal>
+  );
+}
+
 interface AddBookTextFieldProps {
   label: string;
   placeholder: string;
@@ -100,21 +116,5 @@ function AddBookModeTabs({ mode, onSelect }: { mode: AddMode; onSelect: (mode: A
         </button>
       ))}
     </div>
-  );
-}
-
-export function AddBookModal({ form }: { form: AddBookFormModel }) {
-  return (
-    <Modal isOpen={form.isModalOpen} onClose={form.close} title="Add a book">
-      <AddBookModeTabs mode={form.mode} onSelect={form.selectMode} />
-
-      <form onSubmit={form.submit} className="space-y-4 pt-1">
-        <AddBookFields mode={form.mode} values={form.values} onChange={form.updateValues} />
-
-        <Button type="submit" variant="primary" isLoading={form.submitting} className="w-full !mt-6">
-          {form.submitting ? "Queuing…" : "Start performance"}
-        </Button>
-      </form>
-    </Modal>
   );
 }

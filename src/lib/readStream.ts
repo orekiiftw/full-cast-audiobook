@@ -1,3 +1,12 @@
+export function bufferToStream(buffer: Buffer): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array(buffer));
+      controller.close();
+    },
+  });
+}
+
 export async function readStreamWithCap(
   stream: ReadableStream<Uint8Array>,
   maxBytes: number,

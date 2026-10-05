@@ -1,28 +1,12 @@
-export interface ParsedWav {
-  pcm: Buffer;
-  audioFormat: number;
-  sampleRate: number;
-  channels: number;
-  bitsPerSample: number;
-}
-
-interface PcmLayout {
-  pcm: Buffer;
-  frameBytes: number;
-  bytesPerSample: number;
-  channels: number;
-}
-
 const DEFAULT_SAMPLE_RATE = 24000;
+
 const DEFAULT_CHANNELS = 1;
+
 const DEFAULT_BITS_PER_SAMPLE = 16;
 
 const SILENCE_PEAK_THRESHOLD = 0.015;
-const SILENCE_WINDOW_MS = 10;
 
-export function isWavBuffer(buf: Buffer): boolean {
-  return buf.length >= 12 && buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WAVE";
-}
+const SILENCE_WINDOW_MS = 10;
 
 export function pcmToWav(
   pcm: Buffer,
@@ -60,6 +44,14 @@ export function ensureWavBuffer(audio: Buffer): Buffer {
     return audio;
   }
   return pcmToWav(audio);
+}
+
+interface ParsedWav {
+  pcm: Buffer;
+  audioFormat: number;
+  sampleRate: number;
+  channels: number;
+  bitsPerSample: number;
 }
 
 export function parseWav(buf: Buffer): ParsedWav {
@@ -140,12 +132,11 @@ export function concatWavs(buffers: Buffer[]): { wav: Buffer; durationMs: number
   };
 }
 
-function pcmDurationMs(format: ParsedWav, pcmLength: number): number {
-  const bytesPerSecond = format.sampleRate * format.channels * (format.bitsPerSample / 8);
-  if (bytesPerSecond <= 0) {
-    return 0;
-  }
-  return Math.round((pcmLength / bytesPerSecond) * 1000);
+interface PcmLayout {
+  pcm: Buffer;
+  frameBytes: number;
+  bytesPerSample: number;
+  channels: number;
 }
 
 export function trimWavSilence(wav: Buffer, keepMs = 40, threshold = SILENCE_PEAK_THRESHOLD): Buffer {
@@ -189,15 +180,6 @@ export function trimWavSilence(wav: Buffer, keepMs = 40, threshold = SILENCE_PEA
   return pcmToWav(pcm.subarray(from * frameBytes, to * frameBytes), sampleRate, channels, bitsPerSample);
 }
 
-function framePeak(layout: PcmLayout, frame: number): number {
-  let peak = 0;
-  for (let channel = 0; channel < layout.channels; channel++) {
-    const value = Math.abs(layout.pcm.readInt16LE(frame * layout.frameBytes + channel * layout.bytesPerSample) / 32768);
-    if (value > peak) peak = value;
-  }
-  return peak;
-}
-
 export function silenceWav(
   durationSec: number,
   sampleRate = DEFAULT_SAMPLE_RATE,
@@ -206,4 +188,25 @@ export function silenceWav(
 ): Buffer {
   const bytes = Math.max(0, Math.round(durationSec * sampleRate * channels * (bitsPerSample / 8)));
   return pcmToWav(Buffer.alloc(bytes), sampleRate, channels, bitsPerSample);
+}
+
+function isWavBuffer(buf: Buffer): boolean {
+  return buf.length >= 12 && buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WAVE";
+}
+
+function pcmDurationMs(format: ParsedWav, pcmLength: number): number {
+  const bytesPerSecond = format.sampleRate * format.channels * (format.bitsPerSample / 8);
+  if (bytesPerSecond <= 0) {
+    return 0;
+  }
+  return Math.round((pcmLength / bytesPerSecond) * 1000);
+}
+
+function framePeak(layout: PcmLayout, frame: number): number {
+  let peak = 0;
+  for (let channel = 0; channel < layout.channels; channel++) {
+    const value = Math.abs(layout.pcm.readInt16LE(frame * layout.frameBytes + channel * layout.bytesPerSample) / 32768);
+    if (value > peak) peak = value;
+  }
+  return peak;
 }

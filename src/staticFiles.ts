@@ -38,7 +38,9 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 const COMPRESSIBLE_EXTENSIONS = new Set([".html", ".js", ".css", ".svg", ".map", ".json"]);
+
 const GZIP_MIN_BYTES = 1024;
+
 const GZIP_CACHE_MAX = 500;
 
 const gzipCache = new Map<string, { data: ArrayBuffer; size: number; mtimeMs: number }>();

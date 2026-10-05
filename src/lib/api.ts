@@ -6,8 +6,6 @@ interface ApiFetchOptions {
   notifyOnUnauthorized?: boolean;
 }
 
-type ShowToast = (message: string, tone?: "info" | "error") => void;
-
 export async function apiFetch(
   input: RequestInfo | URL,
   init: RequestInit = {},
@@ -32,6 +30,8 @@ export function authUserFromResponse(payload: AuthResponse | AuthUser): AuthUser
   if (!candidate || typeof candidate.email !== "string" || !candidate.email.trim()) return null;
   return candidate;
 }
+
+type ShowToast = (message: string, tone?: "info" | "error") => void;
 
 export function reportNetworkError(err: unknown, showToast: ShowToast): void {
   console.error(err);

@@ -2,22 +2,16 @@ import { parseEpub } from "../../epub";
 import { detectIndicLanguage, normalizeLanguageCode, INDIC_LANGUAGES } from "../../lib/language";
 import { readStreamWithCap } from "../../lib/readStream";
 import { isZipBuffer } from "../../lib/validators";
+import { errorMessage } from "../../lib/errors";
 import { ProviderUnavailableError } from "../errors";
 import { rankBooks } from "../ranking";
 import { BookProvider, BookResult } from "../types";
 
 const THIRD_PARTY_JSON_CAP = 8 * 1024 * 1024;
-const FALLBACK_CANDIDATE_LIMIT = 25;
-const MIN_USABLE_EPUB_BYTES = 5000;
 
-export function bufferToStream(buffer: Buffer): ReadableStream<Uint8Array> {
-  return new ReadableStream({
-    start(controller) {
-      controller.enqueue(new Uint8Array(buffer));
-      controller.close();
-    },
-  });
-}
+const FALLBACK_CANDIDATE_LIMIT = 25;
+
+const MIN_USABLE_EPUB_BYTES = 5000;
 
 export async function readProviderJson<T>(response: Response, what: string, provider: string): Promise<T> {
   if (!response.body) throw new ProviderUnavailableError(`${what} returned an empty response body.`, provider);
@@ -60,8 +54,7 @@ export async function acquireFirstUsableEpub(
       if (acquired) return acquired;
     }
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`${label} search failed: ${msg}`);
+    console.warn(`${label} search failed: ${errorMessage(err)}`);
   }
   return null;
 }
@@ -84,8 +77,7 @@ async function acquireCandidate(
     onProgress?.(`✅ Downloaded "${result.title}" (${(buffer.length / 1024 / 1024).toFixed(2)} MB) from ${label}.`);
     return { buffer, filename: acquired.filename };
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`${label} item '${result.id}' failed to download: ${msg}`);
+    console.warn(`${label} item '${result.id}' failed to download: ${errorMessage(err)}`);
     return null;
   }
 }

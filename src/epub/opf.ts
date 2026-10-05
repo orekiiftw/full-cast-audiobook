@@ -3,19 +3,10 @@ import { parse, type HTMLElement } from "node-html-parser";
 import { findArchiveEntry, readArchiveEntryText, type ArchiveEntries } from "./archive";
 import { EPUB_LIMITS } from "../lib/constants";
 
-export interface PackageDocument {
-  content: string;
-  document: HTMLElement;
-  directory: string;
-}
-
-export interface BookMetadata {
-  title: string;
-  author: string;
-}
-
 const CONTAINER_PATH = "META-INF/container.xml";
+
 const UNKNOWN_TITLE = "Unknown Title";
+
 const UNKNOWN_AUTHOR = "Unknown Author";
 
 export function resolvePackagePath(entries: ArchiveEntries): string {
@@ -46,9 +37,20 @@ export function resolvePackagePath(entries: ArchiveEntries): string {
   return packagePath;
 }
 
+interface PackageDocument {
+  content: string;
+  document: HTMLElement;
+  directory: string;
+}
+
 export function readPackageDocument(entries: ArchiveEntries, packagePath: string): PackageDocument {
   const content = readArchiveEntryText(entries, packagePath, EPUB_LIMITS.MAX_OPF_BYTES, "package document");
   return { content, document: parse(content), directory: path.dirname(packagePath) };
+}
+
+interface BookMetadata {
+  title: string;
+  author: string;
 }
 
 export function readBookMetadata(packageContent: string, packageDocument: HTMLElement): BookMetadata {

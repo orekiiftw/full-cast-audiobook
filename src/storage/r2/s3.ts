@@ -8,48 +8,16 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import { readStreamWithCap } from "../../lib/readStream";
+import { errorMessage } from "../../lib/errors";
 import { downloadLimitExceededError, fileNotFoundError, MAX_DOWNLOAD_BYTES } from "./errors";
 import type { FileStat, StreamRange, StreamResult } from "./types";
 
 const DELETE_OBJECTS_BATCH_SIZE = 1000;
 
-interface S3BodyLike {
-  transformToWebStream?: () => ReadableStream<Uint8Array>;
-  pipe?: unknown;
-  pause?(): void;
-  resume?(): void;
-  on?(event: "data", cb: (chunk: Uint8Array | Buffer) => void): void;
-  on?(event: "end" | "error", cb: (err?: unknown) => void): void;
-  destroy?(reason?: unknown): void;
-}
-
-interface S3NodeStream {
-  on(event: "data", cb: (chunk: Uint8Array | Buffer) => void): void;
-  on(event: "end" | "error", cb: (err?: unknown) => void): void;
-  pause?(): void;
-  resume?(): void;
-  destroy?(reason?: unknown): void;
-}
-
 const s3Client = createClient();
 
 if (!s3Client) {
   console.warn("⚠️ R2 Storage environment variables are not fully configured. Using local file storage under './.storage/'");
-}
-
-function createClient(): S3Client | null {
-  const { R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, R2_BUCKET } = process.env;
-  if (!R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_ENDPOINT || !R2_BUCKET) return null;
-
-  return new S3Client({
-    endpoint: R2_ENDPOINT,
-    credentials: {
-      accessKeyId: R2_ACCESS_KEY_ID,
-      secretAccessKey: R2_SECRET_ACCESS_KEY,
-    },
-    region: "auto",
-    forcePathStyle: true,
-  });
 }
 
 export function usesS3(): boolean {
@@ -67,7 +35,7 @@ export async function uploadToS3(key: string, body: Buffer, contentType: string)
       }),
     );
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     throw new Error(
       `R2 upload failed for "${key}": ${message}. Create the bucket in Cloudflare R2 or clear R2_* env vars to use local ./.storage/.`,
     );
@@ -77,13 +45,6 @@ export async function uploadToS3(key: string, body: Buffer, contentType: string)
 export async function downloadFromS3(key: string): Promise<Buffer> {
   const stream = await openS3Download(key);
   return readStreamWithCap(stream, MAX_DOWNLOAD_BYTES, () => downloadLimitExceededError(key));
-}
-
-async function openS3Download(key: string): Promise<ReadableStream<Uint8Array>> {
-  const response = await s3Client!.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET!, Key: key }));
-  if (!response.Body) throw fileNotFoundError(key);
-  if (response.ContentLength && response.ContentLength > MAX_DOWNLOAD_BYTES) throw downloadLimitExceededError(key);
-  return s3BodyToWebStream(response.Body as S3BodyLike);
 }
 
 export async function downloadFromS3ToPath(key: string, destPath: string): Promise<number> {
@@ -142,6 +103,16 @@ export async function statS3Object(key: string): Promise<FileStat> {
   return { size };
 }
 
+interface S3BodyLike {
+  transformToWebStream?: () => ReadableStream<Uint8Array>;
+  pipe?: unknown;
+  pause?(): void;
+  resume?(): void;
+  on?(event: "data", cb: (chunk: Uint8Array | Buffer) => void): void;
+  on?(event: "end" | "error", cb: (err?: unknown) => void): void;
+  destroy?(reason?: unknown): void;
+}
+
 export async function streamS3Object(key: string, range: StreamRange | null, knownSize?: number): Promise<StreamResult> {
   if (!range && (knownSize ?? 0) <= 0) {
     const get = await s3Client!.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET!, Key: key }));
@@ -182,6 +153,36 @@ export async function streamS3Object(key: string, range: StreamRange | null, kno
     totalSize,
     partial: !!range && length < totalSize,
   };
+}
+
+function createClient(): S3Client | null {
+  const { R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, R2_BUCKET } = process.env;
+  if (!R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_ENDPOINT || !R2_BUCKET) return null;
+
+  return new S3Client({
+    endpoint: R2_ENDPOINT,
+    credentials: {
+      accessKeyId: R2_ACCESS_KEY_ID,
+      secretAccessKey: R2_SECRET_ACCESS_KEY,
+    },
+    region: "auto",
+    forcePathStyle: true,
+  });
+}
+
+async function openS3Download(key: string): Promise<ReadableStream<Uint8Array>> {
+  const response = await s3Client!.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET!, Key: key }));
+  if (!response.Body) throw fileNotFoundError(key);
+  if (response.ContentLength && response.ContentLength > MAX_DOWNLOAD_BYTES) throw downloadLimitExceededError(key);
+  return s3BodyToWebStream(response.Body as S3BodyLike);
+}
+
+interface S3NodeStream {
+  on(event: "data", cb: (chunk: Uint8Array | Buffer) => void): void;
+  on(event: "end" | "error", cb: (err?: unknown) => void): void;
+  pause?(): void;
+  resume?(): void;
+  destroy?(reason?: unknown): void;
 }
 
 function s3BodyToWebStream(body: S3BodyLike): ReadableStream<Uint8Array> {

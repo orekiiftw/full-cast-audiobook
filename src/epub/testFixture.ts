@@ -1,24 +1,5 @@
 import { zipSync, strToU8 } from "fflate";
 
-export interface MockEpubOptions {
-  title?: string;
-  author?: string;
-  chapter1Content?: string;
-  chapter2Content?: string;
-  includeInvalidContainer?: boolean;
-  emptySpine?: boolean;
-  paginatedPages?: number;
-  metadataStyle?: "dc" | "meta-name" | "prefixed" | "none";
-}
-
-interface MockDocument {
-  id: string;
-  name: string;
-  title: string;
-  body: string;
-  inSpine: boolean;
-}
-
 const CONTAINER_XML = `<?xml version="1.0"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
   <rootfiles>
@@ -49,6 +30,17 @@ const DEFAULT_CHAPTER_TWO = `<h1>Chapter 2: The Whispering Woods</h1>
     <p>"Whatever happens next," Marcus whispered with quiet awe, "we must remain vigilant. The guardians of the sanctuary were never known to yield their secrets lightly to outsiders."</p>
     <p>Elena approached the pedestal and placed her hand upon the cool polished surface. A surge of harmonic resonance reverberated through the stones, echoing out into the quiet twilight as the first star of the evening emerged in the northern sky above the canopy.</p>`;
 
+interface MockEpubOptions {
+  title?: string;
+  author?: string;
+  chapter1Content?: string;
+  chapter2Content?: string;
+  includeInvalidContainer?: boolean;
+  emptySpine?: boolean;
+  paginatedPages?: number;
+  metadataStyle?: "dc" | "meta-name" | "prefixed" | "none";
+}
+
 export function createMockEpub(options: MockEpubOptions): Buffer {
   const files: Record<string, Uint8Array> = {
     mimetype: strToU8("application/epub+zip"),
@@ -65,6 +57,14 @@ export function createMockEpub(options: MockEpubOptions): Buffer {
   files["OEBPS/content.opf"] = strToU8(packageDocument(buildMetadataBlock(options), documents));
 
   return Buffer.from(zipSync(files));
+}
+
+interface MockDocument {
+  id: string;
+  name: string;
+  title: string;
+  body: string;
+  inSpine: boolean;
 }
 
 function chapterDocuments(options: MockEpubOptions): MockDocument[] {

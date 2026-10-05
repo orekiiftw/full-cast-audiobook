@@ -1,6 +1,7 @@
 import { BookNotFoundError, ProviderUnavailableError } from "../errors";
 import { AcquiredBook, BookDetails, BookProvider, BookResult, SearchQuery } from "../types";
 import { acquireFirstUsableEpub, readProviderJson } from "./shared";
+import { isAllowedHost } from "../../lib/hosts";
 
 interface GutendexBook {
   id: number;
@@ -11,11 +12,11 @@ interface GutendexBook {
   formats?: Record<string, string>;
 }
 
+const GUTENBERG_HOSTS = ["gutenberg.org", "www.gutenberg.org"];
+
 interface GutendexSearchResponse {
   results?: GutendexBook[];
 }
-
-const GUTENBERG_HOSTS = ["gutenberg.org", "www.gutenberg.org"];
 
 export class GutenbergProvider implements BookProvider {
   readonly name = "gutenberg";
@@ -85,8 +86,4 @@ async function acquireDirectEpub(book: BookResult, allowedHosts: string[], provi
     contentType: res.headers.get("content-type") ?? "application/epub+zip",
     contentLength: Number(res.headers.get("content-length")) || undefined,
   };
-}
-
-function isAllowedHost(host: string, allowedHosts: string[]): boolean {
-  return allowedHosts.some((allowed) => host === allowed || host.endsWith(`.${allowed}`));
 }

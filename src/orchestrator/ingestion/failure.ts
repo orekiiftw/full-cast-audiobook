@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { errorMessage } from "../../lib/errors";
 import { db } from "../../db";
 import { books } from "../../schema";
 import { deleteFile } from "../../storage/r2";
@@ -6,7 +7,7 @@ import { emitProgressEvent } from "../../queue";
 import type { StoredEpub } from "./persistence";
 
 export async function reportIngestionFailure(bookId: string, error: unknown, storedEpub: StoredEpub | undefined): Promise<void> {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   console.error(`❌ Ingestion failed for Book ${bookId}:`, error);
 
   await db.update(books).set({ status: "failed" }).where(eq(books.id, bookId));

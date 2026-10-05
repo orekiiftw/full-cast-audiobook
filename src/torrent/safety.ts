@@ -1,32 +1,19 @@
 import { lookup as dnsLookup } from "node:dns/promises";
+import { isAllowedHost } from "../lib/hosts";
 
 interface ResolvedAddress {
   address: string;
   family: number;
 }
 
+const DNS_CACHE_TTL_MS = 30_000;
+
 interface DnsCacheEntry {
   addresses: ResolvedAddress[];
   expiresAt: number;
 }
 
-const DNS_CACHE_TTL_MS = 30_000;
-
 const dnsCache = new Map<string, DnsCacheEntry>();
-
-export function isPrivateIpv4(a: number, b: number): boolean {
-  if (a === 10) return true;
-  if (a === 127) return true;
-  if (a === 0) return true;
-  if (a >= 224) return true;
-  if (a === 169 && b === 254) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 192 && b === 0) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 198 && (b === 18 || b === 19)) return true;
-  if (a === 100 && b >= 64 && b <= 127) return true;
-  return false;
-}
 
 export function isPrivateIp(ip: string): boolean {
   const normalized = ip.toLowerCase();
@@ -72,22 +59,6 @@ export function isPrivateHost(host: string): boolean {
   return false;
 }
 
-async function resolveHostCached(host: string): Promise<ResolvedAddress[]> {
-  const cached = dnsCache.get(host);
-  if (cached && cached.expiresAt > Date.now()) {
-    dnsCache.delete(host);
-    dnsCache.set(host, { addresses: cached.addresses, expiresAt: Date.now() + DNS_CACHE_TTL_MS });
-    return cached.addresses;
-  }
-  if (dnsCache.size > 100) {
-    const oldest = dnsCache.keys().next().value;
-    if (oldest) dnsCache.delete(oldest);
-  }
-  const addresses = await dnsLookup(host, { all: true });
-  dnsCache.set(host, { addresses, expiresAt: Date.now() + DNS_CACHE_TTL_MS });
-  return addresses;
-}
-
 export function assertSafeDownloadUrl(raw: string): string {
   let url: URL;
   try {
@@ -99,14 +70,7 @@ export function assertSafeDownloadUrl(raw: string): string {
     throw new Error("TorBox returned a non-HTTPS download URL.");
   }
   const host = url.hostname.toLowerCase();
-  const isTorBoxHost = (candidate: string) =>
-    candidate === "torbox.app" ||
-    candidate.endsWith(".torbox.app") ||
-    candidate === "tb-cdn.pw" ||
-    candidate.endsWith(".tb-cdn.pw") ||
-    candidate === "tb-cdn.io" ||
-    candidate.endsWith(".tb-cdn.io");
-  if (!isTorBoxHost(host)) {
+  if (!isAllowedHost(host, ["torbox.app", "tb-cdn.pw", "tb-cdn.io"])) {
     throw new Error(`TorBox returned a download URL on an unexpected host: ${host}`);
   }
   if (isPrivateHost(host)) {
@@ -139,4 +103,34 @@ export async function assertSafeDownloadUrlDns(raw: string): Promise<string> {
 
 export function isIpfsCid(cid: string): boolean {
   return cid.length >= 40 && cid.length <= 80 && /^[0-9A-Za-z]+$/.test(cid);
+}
+
+function isPrivateIpv4(a: number, b: number): boolean {
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 0) return true;
+  if (a >= 224) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 0) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 198 && (b === 18 || b === 19)) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  return false;
+}
+
+async function resolveHostCached(host: string): Promise<ResolvedAddress[]> {
+  const cached = dnsCache.get(host);
+  if (cached && cached.expiresAt > Date.now()) {
+    dnsCache.delete(host);
+    dnsCache.set(host, { addresses: cached.addresses, expiresAt: Date.now() + DNS_CACHE_TTL_MS });
+    return cached.addresses;
+  }
+  if (dnsCache.size > 100) {
+    const oldest = dnsCache.keys().next().value;
+    if (oldest) dnsCache.delete(oldest);
+  }
+  const addresses = await dnsLookup(host, { all: true });
+  dnsCache.set(host, { addresses, expiresAt: Date.now() + DNS_CACHE_TTL_MS });
+  return addresses;
 }

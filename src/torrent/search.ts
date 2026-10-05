@@ -3,15 +3,17 @@ import {
   ERROR_TEXT_CAP,
   SEARCH_API_HOST,
   SEARCH_API_URL,
-  errorMessage,
   fetchApiWithValidatedRedirects,
   readBodyText,
   readJson,
   torBoxApiKey,
 } from "./client";
 import type { TorrentHit } from "./types";
+import { errorMessage } from "../lib/errors";
+import { sleep } from "../lib/async";
 
 const MAX_SEARCH_ATTEMPTS = 2;
+
 const SEARCH_RETRY_DELAY_MS = 750;
 
 let torBoxSearchDownReason: string | null = null;
@@ -22,12 +24,6 @@ export function torBoxSearchDown(): string | null {
 
 export function resetTorBoxSearchCircuit(): void {
   torBoxSearchDownReason = null;
-}
-
-function markTorBoxSearchDown(reason: string): void {
-  if (torBoxSearchDownReason) return;
-  torBoxSearchDownReason = reason;
-  console.warn(`⚠️ TorBox search disabled for this process (${reason}); using the fallback indexers.`);
 }
 
 export function buildTorrentSearchQueries(title: string, author: string): string[] {
@@ -113,7 +109,7 @@ export async function searchTorBox(query: string): Promise<TorrentHit[]> {
         source: "torbox",
       }));
     }
-    if (attempt < MAX_SEARCH_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, SEARCH_RETRY_DELAY_MS));
+    if (attempt < MAX_SEARCH_ATTEMPTS) await sleep(SEARCH_RETRY_DELAY_MS);
   }
   throw lastError;
 }
@@ -164,6 +160,12 @@ export async function searchTorrentsCsv(queries: string[]): Promise<TorrentHit[]
       source: "torrents-csv",
     }));
   });
+}
+
+function markTorBoxSearchDown(reason: string): void {
+  if (torBoxSearchDownReason) return;
+  torBoxSearchDownReason = reason;
+  console.warn(`⚠️ TorBox search disabled for this process (${reason}); using the fallback indexers.`);
 }
 
 async function collectIndexerHits(queries: string[], searchQuery: (query: string) => Promise<TorrentHit[]>): Promise<TorrentHit[]> {

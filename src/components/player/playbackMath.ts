@@ -1,13 +1,6 @@
 import { isPendingStatus, isPlayableSegment } from "../../lib/segmentStatus";
 import type { Segment } from "../../types/api";
 
-export interface SeekPlan {
-  index: number;
-  offsetSec: number;
-  positionMs: number;
-  appliesInPlace: boolean;
-}
-
 export function findNextIndex(segments: Segment[], fromExclusive: number): number {
   let next = fromExclusive + 1;
   while (next < segments.length && segments[next].status === "failed") next += 1;
@@ -59,6 +52,13 @@ export function segmentSourceKey(segment: Segment, src: string): string {
 
 export function loadedSegmentId(loadedKey: string | null): string | null {
   return loadedKey?.split(":")[0] ?? null;
+}
+
+interface SeekPlan {
+  index: number;
+  offsetSec: number;
+  positionMs: number;
+  appliesInPlace: boolean;
 }
 
 export function resolveSeekPlan(segments: Segment[], currentIndex: number, ratio: number): SeekPlan | null {

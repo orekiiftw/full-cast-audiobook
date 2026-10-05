@@ -1,6 +1,6 @@
 export type BookStatus = "discovering" | "casting" | "in_progress" | "ready" | "failed";
-export type ChapterStatus = "queued" | "processing" | "partial_ready" | "ready" | "failed";
-export type SegmentStatus = "pending" | "queued" | "processing" | "annotated" | "voiced" | "failed";
+type ChapterStatus = "queued" | "processing" | "partial_ready" | "ready" | "failed";
+type SegmentStatus = "pending" | "queued" | "processing" | "annotated" | "voiced" | "failed";
 
 export interface Book {
   id: string;
@@ -76,7 +76,7 @@ interface PipelineEventBase {
   timestamp: number;
 }
 
-export interface StatusChangeEvent extends PipelineEventBase {
+interface StatusChangeEvent extends PipelineEventBase {
   type: "status_change";
   status: BookStatus;
   message?: string;
@@ -108,19 +108,19 @@ export interface SegmentReadyEvent extends PipelineEventBase {
   voicedCount: number;
 }
 
-export interface SegmentFailedEvent extends PipelineEventBase {
+interface SegmentFailedEvent extends PipelineEventBase {
   type: "segment_failed";
   segmentId: string;
   chapterId: string;
   error: string;
 }
 
-export interface QuotaExceededEvent extends PipelineEventBase {
+interface QuotaExceededEvent extends PipelineEventBase {
   type: "quota_exceeded";
   message?: string;
 }
 
-export interface ProgressLogEvent extends PipelineEventBase {
+interface ProgressLogEvent extends PipelineEventBase {
   type: "progress_log";
   message: string;
 }

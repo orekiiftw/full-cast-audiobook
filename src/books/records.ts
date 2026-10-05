@@ -1,10 +1,14 @@
-import { and, eq } from "drizzle-orm";
-import { db } from "../../db";
-import { books } from "../../schema";
-import { queueBookIngestion } from "../../orchestrator";
-import { deleteFile, uploadFile } from "../../storage/r2";
-import { firstRow } from "../../lib/query";
-import type { BookSubmission } from "./bookSubmission";
+import { and, asc, eq } from "drizzle-orm";
+import { db } from "../db";
+import { books } from "../schema";
+import { queueBookIngestion } from "../orchestrator";
+import { deleteFile, uploadFile } from "../storage/r2";
+import { firstRow } from "../lib/query";
+import type { BookSubmission } from "./submission";
+
+export function listUserBooks(userId: string) {
+  return db.select().from(books).where(eq(books.userId, userId)).orderBy(asc(books.createdAt));
+}
 
 export async function findBookBySourceHash(userId: string, sourceHash: string) {
   return firstRow(

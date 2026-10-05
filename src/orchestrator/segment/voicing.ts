@@ -3,14 +3,18 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { chapters, segments } from "../../schema";
 import { uploadFile } from "../../storage/r2";
+import { segmentAudioKey } from "../../storage/keys";
 import { synthesizeSegmentAudio } from "../../narration/voiceSegment";
 import { getBookVoiceContext } from "../../narration/voiceContext";
 import { emitProgressEvent, enqueueStitch, type SegmentJobData } from "../../queue";
-import { incrementVoicedCount, shouldEnqueueStitch, type ChapterCounters } from "../chapterCounters";
+import { incrementVoicedCount } from "../chapterCounters";
+import { isChapterComplete, type ChapterCounters } from "../../lib/chapterStatus";
+import { versionedAudioUrl } from "../../lib/audioUrl";
 import { loadSegmentBeats } from "./annotation";
 import { markChapterProcessing, maybeMarkPartialReady } from "./progress";
 
 type ChapterRow = typeof chapters.$inferSelect;
+
 type SegmentRow = typeof segments.$inferSelect;
 
 export async function voiceSegment(job: Job<SegmentJobData>, segmentRow: SegmentRow, chapterRow: ChapterRow): Promise<void> {
@@ -38,15 +42,15 @@ export async function voiceSegment(job: Job<SegmentJobData>, segmentRow: Segment
     },
   });
 
-  const segmentR2Key = `books/${bookId}/chapters/ch_${chapterIndex}/segment_${segmentRow.segmentIndex}.wav`;
-  await uploadFile(segmentR2Key, finalBytes, "audio/wav");
+  const audioR2Key = segmentAudioKey(bookId, chapterIndex, segmentRow.segmentIndex);
+  await uploadFile(audioR2Key, finalBytes, "audio/wav");
 
-  const counters = await publishVoicedSegment(job, segmentRow, chapterRow, segmentR2Key, durationMs);
+  const counters = await publishVoicedSegment(job, segmentRow, chapterRow, audioR2Key, durationMs);
   if (!counters) return;
 
   await maybeMarkPartialReady(bookId, chapterId, chapterIndex, chapterRow.status, counters);
 
-  if (shouldEnqueueStitch(counters)) {
+  if (isChapterComplete(counters)) {
     await enqueueStitch({ bookId, chapterId, chapterIndex });
   }
 }
@@ -70,7 +74,7 @@ async function publishVoicedSegment(
     segmentId,
     segmentIndex: segmentRow.segmentIndex,
     audioR2Key,
-    audioUrl: `/api/audio?key=${encodeURIComponent(audioR2Key)}&v=${durationMs ?? 0}`,
+    audioUrl: versionedAudioUrl(audioR2Key, durationMs),
     durationMs,
     done: counters.voicedCount,
     total: counters.totalCount,

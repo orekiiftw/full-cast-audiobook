@@ -67,7 +67,7 @@ mock.module("../../db", () => ({
   db: mockDb,
   pool: { connect: async () => ({ release: () => {} }), on: () => {} },
 }));
-mock.module("../ownership", () => ({
+mock.module("../../books/ownership", () => ({
   ownedSegment: async () => ({
     segment: {
       id: SEG_ID,

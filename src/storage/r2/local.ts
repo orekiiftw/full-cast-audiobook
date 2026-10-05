@@ -6,30 +6,8 @@ import { downloadLimitExceededError, fileNotFoundError, MAX_DOWNLOAD_BYTES } fro
 import type { FileStat, StreamRange, StreamResult } from "./types";
 
 const LOCAL_STORAGE_DIR = path.resolve("./.storage");
+
 const LOCAL_KEY_ENCODED_MAX_LENGTH = 200;
-
-export function localPathForKey(key: string): string {
-  assertSafeKey(key);
-  const encoded = encodeURIComponent(key);
-  if (encoded.length <= LOCAL_KEY_ENCODED_MAX_LENGTH) {
-    const filePath = path.join(LOCAL_STORAGE_DIR, encoded);
-    if (!filePath.startsWith(LOCAL_STORAGE_DIR + path.sep) && filePath !== LOCAL_STORAGE_DIR) {
-      throw new Error(`Path escape blocked for key: ${key}`);
-    }
-    return filePath;
-  }
-  const hash = createHash("sha256").update(key).digest("hex");
-  const shardDir = path.join(LOCAL_STORAGE_DIR, hash.slice(0, 2), hash.slice(2, 4));
-  const filePath = path.join(shardDir, hash + "_" + encoded.slice(-100));
-  if (!filePath.startsWith(LOCAL_STORAGE_DIR + path.sep)) {
-    throw new Error(`Path escape blocked for key: ${key}`);
-  }
-  return filePath;
-}
-
-async function ensureLocalStorage(): Promise<void> {
-  await fs.mkdir(LOCAL_STORAGE_DIR, { recursive: true });
-}
 
 export async function writeLocalFile(key: string, body: Buffer): Promise<void> {
   await ensureLocalStorage();
@@ -102,6 +80,29 @@ export async function streamLocalFile(key: string, range: StreamRange | null, kn
     totalSize,
     partial: !!range && length < totalSize,
   };
+}
+
+function localPathForKey(key: string): string {
+  assertSafeKey(key);
+  const encoded = encodeURIComponent(key);
+  if (encoded.length <= LOCAL_KEY_ENCODED_MAX_LENGTH) {
+    const filePath = path.join(LOCAL_STORAGE_DIR, encoded);
+    if (!filePath.startsWith(LOCAL_STORAGE_DIR + path.sep) && filePath !== LOCAL_STORAGE_DIR) {
+      throw new Error(`Path escape blocked for key: ${key}`);
+    }
+    return filePath;
+  }
+  const hash = createHash("sha256").update(key).digest("hex");
+  const shardDir = path.join(LOCAL_STORAGE_DIR, hash.slice(0, 2), hash.slice(2, 4));
+  const filePath = path.join(shardDir, hash + "_" + encoded.slice(-100));
+  if (!filePath.startsWith(LOCAL_STORAGE_DIR + path.sep)) {
+    throw new Error(`Path escape blocked for key: ${key}`);
+  }
+  return filePath;
+}
+
+async function ensureLocalStorage(): Promise<void> {
+  await fs.mkdir(LOCAL_STORAGE_DIR, { recursive: true });
 }
 
 function openLocalFileStream(handle: fs.FileHandle, start: number, end: number): ReadableStream<Uint8Array> {

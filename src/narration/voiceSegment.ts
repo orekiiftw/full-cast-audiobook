@@ -6,7 +6,27 @@ import { escapeFfmpegConcatPath, runProcess } from "../audio/ffmpeg";
 import { concatWavs, parseWav, silenceWav, trimWavSilence } from "../audio/wav";
 import { AUDIO } from "../lib/constants";
 
-export interface VoiceBeat {
+const FFMPEG_TIMEOUT_MS = 60_000;
+
+const FFPROBE_TIMEOUT_MS = 15_000;
+
+const MAX_INSTRUCTION_CHARS = 500;
+
+interface BeatDelivery {
+  style: string;
+  emotion: string;
+  intensity: number;
+  pace: string;
+}
+
+const NEUTRAL_RETRY_DELIVERY: BeatDelivery = {
+  style: "natural",
+  emotion: "steady narrative flow",
+  intensity: 0.3,
+  pace: "normal",
+};
+
+interface VoiceBeat {
   text: string;
   delivery?: {
     style?: string;
@@ -16,7 +36,7 @@ export interface VoiceBeat {
   };
 }
 
-export interface VoiceSegmentOptions {
+interface VoiceSegmentOptions {
   narratorVoice: string;
   narratorBaseStyle: string;
   pDict: Record<string, string>;
@@ -26,33 +46,10 @@ export interface VoiceSegmentOptions {
   tempDirPrefix: string;
 }
 
-export interface VoicedSegmentAudio {
+interface VoicedSegmentAudio {
   wav: Buffer;
   durationMs: number;
 }
-
-interface BeatDelivery {
-  style: string;
-  emotion: string;
-  intensity: number;
-  pace: string;
-}
-
-interface Pcm16Format {
-  sampleRate: number;
-  channels: number;
-  bitsPerSample: number;
-}
-
-const FFMPEG_TIMEOUT_MS = 60_000;
-const FFPROBE_TIMEOUT_MS = 15_000;
-const MAX_INSTRUCTION_CHARS = 500;
-const NEUTRAL_RETRY_DELIVERY: BeatDelivery = {
-  style: "natural",
-  emotion: "steady narrative flow",
-  intensity: 0.3,
-  pace: "normal",
-};
 
 export async function synthesizeSegmentAudio(beats: VoiceBeat[], opts: VoiceSegmentOptions): Promise<VoicedSegmentAudio> {
   if (beats.length === 0) {
@@ -191,6 +188,12 @@ async function probeDurationMs(filePath: string): Promise<number> {
 
 function endsAtSentenceBoundary(text: string): boolean {
   return /[.!?।॥…]["'”’»)\]]*$/u.test(text.trim());
+}
+
+interface Pcm16Format {
+  sampleRate: number;
+  channels: number;
+  bitsPerSample: number;
 }
 
 function commonPcm16Format(buffers: Buffer[]): Pcm16Format | null {

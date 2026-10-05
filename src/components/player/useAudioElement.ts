@@ -2,17 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, type MutableRefObject } from "
 import { getSharedAudio } from "../../lib/sharedAudio";
 import { hasRealSource } from "./audioTiming";
 
-interface AudioElementHandlers {
-  onEnded?: () => void;
-  onTimeUpdate?: (positionMs: number) => void;
-  onPlayBlocked?: () => void;
-}
-
 export interface AudioElementSession {
   audioRef: MutableRefObject<HTMLAudioElement | null>;
   wantsPlaybackRef: MutableRefObject<boolean>;
   playGenerationRef: MutableRefObject<number>;
   notifyPlayBlocked: () => void;
+}
+
+interface AudioElementHandlers {
+  onEnded?: () => void;
+  onTimeUpdate?: (positionMs: number) => void;
+  onPlayBlocked?: () => void;
 }
 
 export function useAudioElement({ onEnded, onTimeUpdate, onPlayBlocked }: AudioElementHandlers = {}): AudioElementSession {

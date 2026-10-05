@@ -1,6 +1,6 @@
-export type RedirectFailure = "missing-location" | "invalid-target" | "redirect-limit";
+type RedirectFailure = "missing-location" | "invalid-target" | "redirect-limit";
 
-export interface RedirectContext {
+interface RedirectContext {
   initialUrl: URL;
   currentUrl: URL;
   hops: number;
@@ -10,15 +10,6 @@ export interface RedirectGuard {
   approve: (target: URL, context: RedirectContext) => URL | Promise<URL>;
   fail: (failure: RedirectFailure) => Error;
   maxHops?: number;
-}
-
-export interface GuardedFetchOptions {
-  url: string;
-  timeoutMs: number;
-  guard: RedirectGuard;
-  headers?: Record<string, string>;
-  method?: string;
-  body?: BodyInit;
 }
 
 const DEFAULT_MAX_REDIRECT_HOPS = 3;
@@ -31,6 +22,15 @@ const REDIRECT_PROBLEMS: Record<RedirectFailure, string> = {
 
 export function redirectFailureMessage(label: string, failure: RedirectFailure): string {
   return `${label} ${REDIRECT_PROBLEMS[failure]}`;
+}
+
+interface GuardedFetchOptions {
+  url: string;
+  timeoutMs: number;
+  guard: RedirectGuard;
+  headers?: Record<string, string>;
+  method?: string;
+  body?: BodyInit;
 }
 
 export async function fetchWithRedirectGuard({ url, timeoutMs, guard, headers, method, body }: GuardedFetchOptions): Promise<Response> {

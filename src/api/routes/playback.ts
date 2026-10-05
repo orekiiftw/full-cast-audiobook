@@ -1,24 +1,15 @@
-import { db } from "../../db";
-import { playbackState } from "../../schema";
-import { ensureChapterLookahead, ensureLookahead } from "../../orchestrator";
+import { syncPlaybackPosition, type PlaybackPosition } from "../../books";
 import { json } from "../response";
 import { type RouteContext, type RouteTable } from "../route";
 import { ValidationError, requireNumber, requireUuid } from "../../lib/validators";
 import { readJsonWithLimit } from "../body";
-import { ownedBook, ownedChapter } from "../ownership";
+import { ownedBook, ownedChapter } from "../../books/ownership";
 
 const MAX_POSITION_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const playbackRoutes: RouteTable = {
   "PUT /api/playback": syncPlayback,
 };
-
-interface PlaybackPayload {
-  bookId: string;
-  chapterId: string;
-  positionMs: number;
-  segmentIndex?: number;
-}
 
 async function syncPlayback({ req, user }: RouteContext): Promise<Response> {
   const payload = await readPlaybackPayload(req);
@@ -28,23 +19,12 @@ async function syncPlayback({ req, user }: RouteContext): Promise<Response> {
     return json({ error: "Book or chapter not found" }, 404);
   }
 
-  await storePlaybackPosition(payload);
-
-  const chapterIndex = chapter.chapter.chapterIndex;
-  ensureChapterLookahead(payload.bookId, chapterIndex).catch((err) =>
-    console.error(`Lookahead ensure failed for book ${payload.bookId} ch ${chapterIndex}:`, err),
-  );
-
-  if (payload.segmentIndex !== undefined) {
-    ensureLookahead(payload.bookId, { chapterIndex, segmentIndex: payload.segmentIndex }).catch((err) =>
-      console.error(`Lookahead re-center failed for book ${payload.bookId} ch ${chapterIndex} seg ${payload.segmentIndex}:`, err),
-    );
-  }
+  await syncPlaybackPosition(payload, chapter.chapter.chapterIndex);
 
   return json({ success: true });
 }
 
-async function readPlaybackPayload(req: Request): Promise<PlaybackPayload> {
+async function readPlaybackPayload(req: Request): Promise<PlaybackPosition> {
   const body = (await readJsonWithLimit(req)) as Record<string, unknown>;
   const bookId = requireUuid(body.bookId, "bookId");
   const chapterId = requireUuid(body.chapterId, "chapterId");
@@ -59,24 +39,4 @@ async function readPlaybackPayload(req: Request): Promise<PlaybackPayload> {
   }
 
   return { bookId, chapterId, positionMs, segmentIndex };
-}
-
-async function storePlaybackPosition({ bookId, chapterId, positionMs }: PlaybackPayload): Promise<void> {
-  const rounded = Math.round(positionMs);
-
-  await db
-    .insert(playbackState)
-    .values({
-      bookId,
-      chapterId,
-      positionMs: rounded,
-      updatedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: [playbackState.bookId, playbackState.chapterId],
-      set: {
-        positionMs: rounded,
-        updatedAt: new Date(),
-      },
-    });
 }

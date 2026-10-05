@@ -10,7 +10,7 @@ export interface SpinePage {
   hasHeading: boolean;
 }
 
-export interface ParsedChapter {
+interface ParsedChapter {
   title: string;
   chapterIndex: number;
   blocks: BookBlock[];
@@ -23,7 +23,9 @@ export interface ParsedBook {
 }
 
 const CHAPTER_START_MIN_WORDS = 400;
+
 const CHAPTER_START_HEADING_RE = /^\s*(prologue|chapter|volume|part|book)\s+/i;
+
 const CHAPTER_START_FILENAME_RE = /ch(?:apter)?[_-]?\d|part[_-]?\d|prologue/i;
 
 export function isChapterStart(heading: string, filePath: string, blocks: BookBlock[], pageWords: number): boolean {

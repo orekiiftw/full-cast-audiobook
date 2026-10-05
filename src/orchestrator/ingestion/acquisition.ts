@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { errorMessage } from "../../lib/errors";
 import { downloadBookFromCandidates, downloadBookFromTorrent, resolveTorrentCandidates, type TorrentCandidate } from "../../torrent";
 import { searchCatalogueTorrentCandidates } from "../../acquisition/catalogue";
 import { bookProviders, enabledLibrarySources, UnsupportedFormatError, type BookResult } from "../../acquisition";
@@ -88,7 +89,7 @@ async function searchTorrentCandidates(bookId: string, title: string, author: st
     const liveCandidates = await resolveTorrentCandidates(title, author);
     if (liveCandidates.length > 0) return liveCandidates;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     console.warn(`⚠️ Live torrent search failed (${message}); continuing to catalogue fallback...`);
   }
 
@@ -108,7 +109,7 @@ async function downloadFromCandidates(bookId: string, candidates: TorrentCandida
     });
     return downloaded.buffer;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     console.warn(`⚠️ Torrent/IPFS candidates failed (${message}); attempting open digital library fallback...`);
     return undefined;
   }

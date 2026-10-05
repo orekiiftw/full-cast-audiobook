@@ -48,14 +48,19 @@ const FRONT_BACK_STEM_RE =
 export const FRONT_MATTER_TITLE_RE =
   /^\s*(synopsis|contents|table of contents|list of (chapters|illustrations)|index|preface|foreword|introduction|dedication|epigraph|acknowledg|about the (author|publisher|book|novel|story|edition)|about this (book|edition|novel|story)|also by|by the same author|praise\b|reviews?|editorial review|description|blurb|publisher'?s note|author'?s note|a note\b|note from|note on the text|copyright|illustrations|chronology|a chronology|the editor|half title|reader'?s guide|cast of characters|dramatis personae|preview|excerpt|sample)\b/i;
 
-export const BACK_MATTER_SECTION_RE =
+const BACK_MATTER_SECTION_RE =
   /^\s*(contexts|criticism|critical (essays|contexts|heritage)|appendix|appendices|bibliography|selected bibliography|works cited|endnotes|notes|glossary|index|about the author|about the publisher|afterword|chronology|a chronology)\b/i;
 
 const BACK_MATTER_MIN_SPINE_FRACTION = 0.6;
+
 const FRONT_MATTER_BODY_MAX_WORDS = 60;
+
 const FRONT_MATTER_BODY_SHORT_BLOCK_WORDS = 25;
+
 const FRONT_MATTER_BODY_SHORT_BLOCK_SHARE = 0.7;
+
 const FRONT_MATTER_BODY_LONG_PROSE_WORDS = 60;
+
 const FRONT_MATTER_BODY_QUOTED_BLOCK_SHARE = 0.5;
 
 const TOC_ENTRY_RE =
@@ -64,28 +69,47 @@ const TOC_ENTRY_RE =
 const TOC_NUMBERED_RE = /^(?:[ivxlcdm]+|\d{1,3})[\.\)\:\-–—]\s+\S+/i;
 
 const TOC_LINE_MAX_LENGTH = 120;
+
 const TOC_ENTRY_MAX_WORDS = 14;
+
 const TOC_NARRATIVE_MIN_WORDS = 40;
+
 const TOC_HEADING_MAX_WORDS = 10;
+
 const TOC_DENSE_SHARE = 0.45;
+
 const TOC_DENSE_ENTRIES = 4;
+
 const TOC_SHORT_LINE_SHARE = 0.75;
+
 const TOC_SHORT_LINE_MIN_BLOCKS = 5;
+
 const TOC_MIN_ENTRY_LINES = 3;
+
 const TOC_ALMOST_EVERY_LINE_SHARE = 0.7;
 
 const TOC_NAV_LINKS = 4;
+
 const TOC_NAV_CHAPTERISH_LINKS = 3;
+
 const TOC_NAV_LINKS_WITHOUT_CHECK = 8;
+
 const TOC_LIST_ITEMS = 5;
+
 const TOC_LIST_ENTRIES = 4;
+
 const TOC_LIST_ENTRY_SHARE = 0.5;
+
 const TOC_LIST_TITLE_MAX_WORDS = 12;
+
 const TOC_PAGE_MAX_PROSE_WORDS = 80;
 
 const TOC_LEADING_BLOCKS_MIN = 4;
+
 const TOC_LEADING_RUN_MIN = 3;
+
 const TOC_LEADING_FIRST_PROSE_WORDS = 20;
+
 const TOC_LEADING_FILLER_MAX_WORDS = 6;
 
 export function isFrontBackMatterPath(filePath: string): boolean {

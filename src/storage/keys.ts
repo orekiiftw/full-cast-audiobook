@@ -1,3 +1,7 @@
+export function segmentAudioKey(bookId: string, chapterIndex: number, segmentIndex: number): string {
+  return `books/${bookId}/chapters/ch_${chapterIndex}/segment_${segmentIndex}.wav`;
+}
+
 export function isSafeStorageKey(key: string): boolean {
   if (!key || typeof key !== "string") return false;
   if (key.length > 512) return false;

@@ -145,6 +145,7 @@ describe("downloadBookFromCandidates skip-cold fallback", () => {
   });
 
   test("skips a cold edition when a healthier one is ahead (torrent never attempted)", async () => {
+    process.env.TORBOX_API_KEY = "test-key";
     const { torrentAdds } = mockTorBoxDownloadFetch();
     const cold = torrentCandidate({ name: "cold edition", cached: false, alive: false });
     const healthy = torrentCandidate({
@@ -160,6 +161,7 @@ describe("downloadBookFromCandidates skip-cold fallback", () => {
   });
 
   test("still attempts the best-ranked edition when every candidate is cold (last resort)", async () => {
+    process.env.TORBOX_API_KEY = "test-key";
     const { torrentAdds } = mockTorBoxDownloadFetch();
 
     await expect(downloadBookFromCandidates([torrentCandidate({ name: "only cold", cached: false, alive: false })])).rejects.toThrow(

@@ -8,6 +8,34 @@
       "when": 1784606209928,
       "tag": "0000_sour_miracleman",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1784606209929,
+      "tag": "0001_auth_and_ownership",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784606209930,
+      "tag": "0002_book_acquisition",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1784606209931,
+      "tag": "0003_chapter_counters_and_queue_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1784606209932,
+      "tag": "0004_narrator_preview_cache",
+      "breakpoints": true
     }
   ]
 }

@@ -4,14 +4,14 @@ import { redis, redisSub } from "./connection";
 import { ingestionQueue, maintenanceQueue, queueOptions, segmentQueue, stitchQueue } from "./queues";
 import type { IngestionJobData, SegmentJobData, StitchJobData } from "./queues";
 
-export interface PipelineProcessors {
+const workers: Worker[] = [];
+
+interface PipelineProcessors {
   ingest: (job: Job<IngestionJobData>) => Promise<void>;
   voice: (job: Job<SegmentJobData>) => Promise<void>;
   stitch: (job: Job<StitchJobData>) => Promise<void>;
   sweep: (job: Job) => Promise<void>;
 }
-
-const workers: Worker[] = [];
 
 export function startWorkers(processors: PipelineProcessors): void {
   const makeWorker = <T>(queueName: string, fn: (job: Job<T>) => Promise<void>, concurrency: number) =>

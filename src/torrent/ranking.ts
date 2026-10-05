@@ -1,21 +1,38 @@
 import { TORRENT } from "../lib/constants";
 import type { TorrentCandidate, TorrentHit } from "./types";
 
-interface ScoredHit {
-  hit: TorrentHit;
-  score: number;
-  matchesQuery: boolean;
-}
-
 export function topEpubTorrents(hits: TorrentHit[], title: string, author: string, limit: number): TorrentHit[] {
-  return scoreEpubTorrent(hits, title, author)
+  return scoreEpubTorrents(hits, title, author)
     .filter(({ hit, score, matchesQuery }) => /\bepub\b|\.epub\b/i.test(hit.name) && matchesQuery && score > 0)
     .sort((a, b) => b.score - a.score || b.hit.seeds - a.hit.seeds)
     .slice(0, limit)
     .map(({ hit }) => hit);
 }
 
-function scoreEpubTorrent(hits: TorrentHit[], title: string, author: string): ScoredHit[] {
+export function candidateHealth(candidate: TorrentCandidate): "cached" | "cold" | null {
+  if (candidate.cached) return "cached";
+  if (candidate.alive === false) return "cold";
+  return null;
+}
+
+export function candidateHealthRank(candidate: TorrentCandidate): number {
+  if (candidate.cached) return 0;
+  if (candidate.alive === true) return 1;
+  if (candidate.alive === null) return 2;
+  return 3;
+}
+
+export function isColdCandidate(candidate: TorrentCandidate): boolean {
+  return candidate.cached === false && candidate.alive === false;
+}
+
+interface ScoredHit {
+  hit: TorrentHit;
+  score: number;
+  matchesQuery: boolean;
+}
+
+function scoreEpubTorrents(hits: TorrentHit[], title: string, author: string): ScoredHit[] {
   const titleTokens = tokenize(title);
   const authorTokens = tokenize(author);
   return hits
@@ -48,21 +65,4 @@ function tokenize(value: string): string[] {
     .split(/\s+/)
     .filter((word) => word.length > 2 || /[^\x00-\x7f]/.test(word))
     .filter((word) => !["the", "and", "for"].includes(word));
-}
-
-export function candidateHealth(candidate: TorrentCandidate): "cached" | "cold" | null {
-  if (candidate.cached) return "cached";
-  if (candidate.alive === false) return "cold";
-  return null;
-}
-
-export function rankCandidate(candidate: TorrentCandidate): number {
-  if (candidate.cached) return 0;
-  if (candidate.alive === true) return 1;
-  if (candidate.alive === null) return 2;
-  return 3;
-}
-
-export function isColdCandidate(candidate: TorrentCandidate): boolean {
-  return candidate.cached === false && candidate.alive === false;
 }

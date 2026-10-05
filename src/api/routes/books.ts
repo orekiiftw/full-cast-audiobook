@@ -1,14 +1,11 @@
-import { asc, eq } from "drizzle-orm";
-import { db } from "../../db";
-import { books } from "../../schema";
+import { listUserBooks, findBookById } from "../../books";
 import { deleteBook, retryFailedBook } from "../../orchestrator";
 import { json } from "../response";
 import { type RouteContext, type RouteTable } from "../route";
 import { requireUuid } from "../../lib/validators";
-import { ownedBook } from "../ownership";
+import { ownedBook } from "../../books/ownership";
 import { createBook } from "./bookCreation";
 import { getBookDetail } from "./bookDetail";
-import { findBookById } from "./bookRecords";
 
 export const bookRoutes: RouteTable = {
   "GET /api/books": listBooks,
@@ -19,8 +16,7 @@ export const bookRoutes: RouteTable = {
 };
 
 async function listBooks({ user }: RouteContext): Promise<Response> {
-  const allBooks = await db.select().from(books).where(eq(books.userId, user.id)).orderBy(asc(books.createdAt));
-  return json(allBooks);
+  return json(await listUserBooks(user.id));
 }
 
 async function retryBook({ user, params }: RouteContext): Promise<Response> {

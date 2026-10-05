@@ -5,7 +5,8 @@ import { segments } from "../../schema";
 import { PIPELINE } from "../../lib/constants";
 import { firstRow } from "../../lib/query";
 import { emitProgressEvent, enqueueStitch, type SegmentJobData } from "../../queue";
-import { incrementFailedCount, recomputeChapterCounters, shouldEnqueueStitch } from "../chapterCounters";
+import { incrementFailedCount, recomputeChapterCounters } from "../chapterCounters";
+import { isChapterComplete } from "../../lib/chapterStatus";
 
 export async function reportSegmentFailure(job: Job<SegmentJobData>, error: unknown): Promise<void> {
   const { bookId, chapterId, segmentId, chapterIndex } = job.data;
@@ -31,7 +32,7 @@ export async function reportSegmentFailure(job: Job<SegmentJobData>, error: unkn
 async function repairPostVoicedCounters(bookId: string, chapterId: string, chapterIndex: number): Promise<void> {
   try {
     const counters = await recomputeChapterCounters(chapterId);
-    if (shouldEnqueueStitch(counters)) {
+    if (isChapterComplete(counters)) {
       await enqueueStitch({ bookId, chapterId, chapterIndex });
     }
   } catch (repairErr) {
@@ -60,7 +61,7 @@ async function failSegmentPermanently(
   });
 
   const counters = await incrementFailedCount(chapterId);
-  if (shouldEnqueueStitch(counters)) {
+  if (isChapterComplete(counters)) {
     await enqueueStitch({ bookId, chapterId, chapterIndex });
   }
 }

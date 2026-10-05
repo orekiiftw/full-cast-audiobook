@@ -2,26 +2,14 @@ import { useEffect, useRef, useCallback } from "react";
 import { AUTH_EXPIRED_EVENT, apiFetch } from "../lib/api";
 import type { PipelineEvent } from "../types/api";
 
+const RECONNECT_BASE_MS = 1000;
+
+const RECONNECT_MAX_MS = 30000;
+
 interface UseSSEOptions {
   onEvent: (event: PipelineEvent) => void;
   onError?: (error: Event) => void;
   onReconnect?: () => void;
-}
-
-const RECONNECT_BASE_MS = 1000;
-const RECONNECT_MAX_MS = 30000;
-
-function reconnectDelayMs(attempt: number): number {
-  return Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** attempt);
-}
-
-async function sessionSurvivedInterrupt(): Promise<boolean> {
-  try {
-    const response = await apiFetch("/api/auth/me", { method: "GET" });
-    return response.status !== 401;
-  } catch {
-    return true;
-  }
 }
 
 export function useSSE(url: string, { onEvent, onError, onReconnect }: UseSSEOptions) {
@@ -106,4 +94,17 @@ export function useSSE(url: string, { onEvent, onError, onReconnect }: UseSSEOpt
       stop();
     };
   }, [connect, stop]);
+}
+
+function reconnectDelayMs(attempt: number): number {
+  return Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** attempt);
+}
+
+async function sessionSurvivedInterrupt(): Promise<boolean> {
+  try {
+    const response = await apiFetch("/api/auth/me", { method: "GET" });
+    return response.status !== 401;
+  } catch {
+    return true;
+  }
 }

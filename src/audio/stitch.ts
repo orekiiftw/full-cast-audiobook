@@ -6,25 +6,26 @@ import { AUDIO } from "../lib/constants";
 import { escapeFfmpegConcatPath, getAudioDurationMs, runProcess, DEFAULT_COMMAND_TIMEOUT_MS } from "./ffmpeg";
 import { silenceWav } from "./wav";
 
+const MAX_STITCH_TIMEOUT_MS = 60 * 60_000;
+
+const MAX_CHAPTER_STITCH_BYTES = 4 * 1024 * 1024 * 1024;
+
+const STITCH_BYTES_PER_SECOND = 48_000;
+
+const DOWNLOAD_CONCURRENCY = 8;
+
+const STANDARD_GAP_FILE = "silence_350.wav";
+
+const SCENE_BREAK_GAP_FILE = "silence_700.wav";
+
+const CONCAT_LIST_FILE = "concat_list.txt";
+
+const FINAL_MP3_FILE = "chapter_final.mp3";
+
 interface StitchSegmentInput {
   audioR2Key: string;
   isSceneBreak: boolean;
 }
-
-interface DownloadedSegments {
-  fileNames: (string | null)[];
-  totalBytes: number;
-}
-
-const MAX_STITCH_TIMEOUT_MS = 60 * 60_000;
-const MAX_CHAPTER_STITCH_BYTES = 4 * 1024 * 1024 * 1024;
-const STITCH_BYTES_PER_SECOND = 48_000;
-const DOWNLOAD_CONCURRENCY = 8;
-
-const STANDARD_GAP_FILE = "silence_350.wav";
-const SCENE_BREAK_GAP_FILE = "silence_700.wav";
-const CONCAT_LIST_FILE = "concat_list.txt";
-const FINAL_MP3_FILE = "chapter_final.mp3";
 
 export async function stitchChapter(
   bookId: string,
@@ -52,6 +53,11 @@ export async function stitchChapter(
 async function writeGapFiles(workDir: string): Promise<void> {
   await fs.writeFile(path.join(workDir, STANDARD_GAP_FILE), silenceWav(AUDIO.STANDARD_GAP_MS / 1000));
   await fs.writeFile(path.join(workDir, SCENE_BREAK_GAP_FILE), silenceWav(AUDIO.SCENE_BREAK_GAP_MS / 1000));
+}
+
+interface DownloadedSegments {
+  fileNames: (string | null)[];
+  totalBytes: number;
 }
 
 async function downloadSegments(segments: StitchSegmentInput[], workDir: string): Promise<DownloadedSegments> {

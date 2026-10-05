@@ -8,7 +8,10 @@ import { reportSegmentFailure } from "./failure";
 import { voiceSegment } from "./voicing";
 
 type ChapterRow = typeof chapters.$inferSelect;
+
 type SegmentRow = typeof segments.$inferSelect;
+
+export type { ChapterRow, SegmentRow };
 
 export async function runSegmentJob(job: Job<SegmentJobData>): Promise<void> {
   const { bookId, chapterId, segmentId } = job.data;
@@ -49,5 +52,3 @@ async function claimSegment(segmentId: string, chapterId: string): Promise<Segme
     .returning();
   return claimed[0] ?? null;
 }
-
-export type { ChapterRow, SegmentRow };

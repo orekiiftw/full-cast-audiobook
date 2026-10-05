@@ -1,12 +1,5 @@
 import type { ReactNode } from "react";
 
-interface BadgeProps {
-  children: ReactNode;
-  tone?: "neutral" | "gold" | "emerald" | "cyan" | "purple" | "red";
-  pulse?: boolean;
-  className?: string;
-}
-
 const tones = {
   neutral: "bg-cinema-800/90 text-cinema-300 border-white/[0.06]",
   gold: "bg-gold-950/70 text-gold-300 border-gold-700/30",
@@ -15,6 +8,13 @@ const tones = {
   purple: "bg-violet-950/50 text-violet-300 border-violet-800/40",
   red: "bg-red-950/50 text-red-300 border-red-900/40",
 };
+
+interface BadgeProps {
+  children: ReactNode;
+  tone?: "neutral" | "gold" | "emerald" | "cyan" | "purple" | "red";
+  pulse?: boolean;
+  className?: string;
+}
 
 export function Badge({ children, tone = "neutral", pulse = false, className = "" }: BadgeProps) {
   return (

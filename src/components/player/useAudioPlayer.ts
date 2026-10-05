@@ -1,7 +1,7 @@
 import { useAudioElement } from "./useAudioElement";
 import { useAudioTransport, type AudioTransport } from "./useAudioTransport";
 
-export interface AudioPlayerOptions {
+interface AudioPlayerOptions {
   onEnded?: () => void;
   onTimeUpdate?: (positionMs: number) => void;
   onPlayBlocked?: () => void;

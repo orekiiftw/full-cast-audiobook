@@ -1,11 +1,12 @@
 import { createHash, randomBytes } from "crypto";
 import { and, eq, gt, gte, lt } from "drizzle-orm";
-import { db } from "./db";
-import { sessions, users } from "./schema";
-import { firstRow } from "./lib/query";
+import { db } from "../db";
+import { sessions, users } from "../schema";
+import { firstRow } from "../lib/query";
 
-export const SESSION_COOKIE = "narratea_session";
-export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const SESSION_COOKIE = "narratea_session";
+
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 const SESSION_MAX_AGE_MS = (() => {
   const configured = Number(process.env.SESSION_MAX_AGE_MS);
@@ -16,27 +17,6 @@ const SESSION_MAX_AGE_MS = (() => {
 export interface AuthUser {
   id: string;
   email: string;
-}
-
-export interface SessionToken {
-  token: string;
-  expiresAt: Date;
-}
-
-export function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase();
-}
-
-export function isValidEmail(email: string): boolean {
-  return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-export function isValidPassword(password: string): boolean {
-  return password.length >= 12 && password.length <= 128;
-}
-
-export function hashSessionToken(token: string): string {
-  return createHash("sha256").update(token, "utf8").digest("hex");
 }
 
 export function readSessionToken(req: Request): string | null {
@@ -82,6 +62,11 @@ export function parsedClientIp(req: Request, connectionIp: string): string {
   return hops[hops.length - trustedHops] || connectionIp;
 }
 
+interface SessionToken {
+  token: string;
+  expiresAt: Date;
+}
+
 export async function createSession(userId: string): Promise<SessionToken> {
   const session = newSessionToken();
   await db.insert(sessions).values({ userId, tokenHash: hashSessionToken(session.token), expiresAt: session.expiresAt });
@@ -98,18 +83,8 @@ export async function createSessionRotating(userId: string): Promise<SessionToke
   return session;
 }
 
-function newSessionToken(): SessionToken {
-  return {
-    token: randomBytes(32).toString("base64url"),
-    expiresAt: new Date(Date.now() + SESSION_TTL_MS),
-  };
-}
-
-function sweepExpiredSessions(probability: number): void {
-  if (Math.random() >= probability) return;
-  db.delete(sessions)
-    .where(lt(sessions.expiresAt, new Date()))
-    .catch((err) => console.warn("Session sweep failed:", err));
+export async function revokeSession(token: string): Promise<void> {
+  await db.delete(sessions).where(eq(sessions.tokenHash, hashSessionToken(token)));
 }
 
 export async function authenticateRequest(req: Request): Promise<AuthUser | null> {
@@ -134,6 +109,24 @@ export async function authenticateRequest(req: Request): Promise<AuthUser | null
   );
 
   return row ?? null;
+}
+
+function hashSessionToken(token: string): string {
+  return createHash("sha256").update(token, "utf8").digest("hex");
+}
+
+function newSessionToken(): SessionToken {
+  return {
+    token: randomBytes(32).toString("base64url"),
+    expiresAt: new Date(Date.now() + SESSION_TTL_MS),
+  };
+}
+
+function sweepExpiredSessions(probability: number): void {
+  if (Math.random() >= probability) return;
+  db.delete(sessions)
+    .where(lt(sessions.expiresAt, new Date()))
+    .catch((err) => console.warn("Session sweep failed:", err));
 }
 
 function cookieSecure(req: Request): boolean {

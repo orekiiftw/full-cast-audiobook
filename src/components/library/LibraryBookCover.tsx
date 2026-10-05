@@ -1,5 +1,6 @@
 import { Badge, Icon } from "../ui";
 import type { Book } from "../../types/api";
+import { audioUrl } from "../../lib/audioUrl";
 
 const STATUS_TONE: Record<Book["status"], { tone: "cyan" | "purple" | "gold" | "red" | "emerald"; pulse: boolean; label: string }> = {
   discovering: { tone: "cyan", pulse: false, label: "Discovering" },
@@ -22,7 +23,7 @@ export function LibraryBookCover({ book, onDelete }: LibraryBookCoverProps) {
       {book.coverR2Key ? (
         <>
           <img
-            src={`/api/audio?key=${encodeURIComponent(book.coverR2Key)}`}
+            src={audioUrl(book.coverR2Key)}
             alt={book.title}
             loading="lazy"
             decoding="async"

@@ -1,5 +1,7 @@
 export const AUDIO_READY_TIMEOUT_MS = 6000;
+
 export const AUDIO_SEEK_TIMEOUT_MS = 2000;
+
 export const SEEK_EPSILON_SEC = 0.05;
 
 export function waitForEvent(audio: HTMLAudioElement, event: string, timeoutMs: number): Promise<boolean> {

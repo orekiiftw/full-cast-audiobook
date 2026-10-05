@@ -10,7 +10,7 @@ interface LoadOptions {
   autoplay?: boolean;
 }
 
-export interface SegmentSources {
+interface SegmentSources {
   loadSegmentSource: (segment: Segment, options?: LoadOptions) => void;
   prefetchNextSegment: (segments: Segment[], index: number) => void;
   queueSeek: (seconds: number | null) => void;

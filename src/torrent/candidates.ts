@@ -2,17 +2,18 @@ import {
   API_TIMEOUT_MS,
   MAIN_API_URL,
   TORBOX_API_HOSTS,
-  errorMessage,
   fetchApiWithValidatedRedirects,
   readJson,
   sanitizeLogText,
   torBoxApiKey,
 } from "./client";
-import { candidateHealth, rankCandidate, topEpubTorrents } from "./ranking";
+import { candidateHealth, candidateHealthRank, topEpubTorrents } from "./ranking";
 import { buildTorrentSearchQueries, cleanHash, searchApibay, searchTorBox, searchTorrentsCsv, torBoxSearchDown } from "./search";
 import type { TorrentCandidate, TorrentHit } from "./types";
+import { errorMessage } from "../lib/errors";
 
 const CANDIDATES_PER_PROVIDER = 3;
+
 const ALIVE_PROBE_MAX = 5;
 
 export async function resolveTorrentCandidates(title: string, author: string): Promise<TorrentCandidate[]> {
@@ -28,10 +29,15 @@ export async function resolveTorrentCandidates(title: string, author: string): P
   await applyCacheState(candidates);
   await probeUncachedCandidates(candidates);
 
-  candidates.sort((a, b) => rankCandidate(a) - rankCandidate(b) || b.seeds - a.seeds || a.name.localeCompare(b.name));
+  candidates.sort((a, b) => candidateHealthRank(a) - candidateHealthRank(b) || b.seeds - a.seeds || a.name.localeCompare(b.name));
 
   console.log(`🏅 Ranked ${candidates.length} candidate(s): ${candidates.map(describeCandidate).join("; ")}`);
   return candidates;
+}
+
+export async function isTorrentCached(hash: string): Promise<boolean> {
+  const clean = cleanHash(hash.replace("magnet:?xt=urn:btih:", "").split("&")[0]);
+  return clean ? ((await batchCheckCached([clean])).get(clean) ?? false) : false;
 }
 
 async function gatherAllHits(queries: string[], title: string, author: string): Promise<TorrentHit[]> {
@@ -89,11 +95,6 @@ async function gatherProviderHits(name: string, search: () => Promise<TorrentHit
     console.warn(`⚠️ Search provider "${name}" failed: ${errorMessage(error)}`);
     return [];
   }
-}
-
-export async function isTorrentCached(hash: string): Promise<boolean> {
-  const clean = cleanHash(hash.replace("magnet:?xt=urn:btih:", "").split("&")[0]);
-  return clean ? ((await batchCheckCached([clean])).get(clean) ?? false) : false;
 }
 
 async function batchCheckCached(hashes: string[]): Promise<Map<string, boolean>> {

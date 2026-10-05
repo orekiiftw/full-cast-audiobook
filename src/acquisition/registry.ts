@@ -2,16 +2,13 @@ import { and, eq, gt } from "drizzle-orm";
 import { db } from "../db";
 import { bookMetadata, bookSearchCache } from "../schema";
 import { firstRow } from "../lib/query";
+import { positiveEnvInt } from "../lib/env";
 import { AcquisitionError } from "./errors";
 import { normalizeSearchQuery, rankBooks } from "./ranking";
 import { BookDetails, BookProvider, BookResult, ProviderSearchResponse, SearchQuery } from "./types";
 
-function positiveEnvInt(name: string, fallback: number, min: number, max: number): number {
-  const value = Number(process.env[name]);
-  return Number.isFinite(value) && Number.isInteger(value) && value >= min && value <= max ? value : fallback;
-}
-
 const cacheTtlMs = positiveEnvInt("BOOK_SEARCH_CACHE_TTL_MS", 3_600_000, 60_000, 7 * 24 * 60 * 60 * 1000);
+
 const maxResults = positiveEnvInt("BOOK_SEARCH_MAX_RESULTS", 25, 1, 100);
 
 export class ProviderRegistry {

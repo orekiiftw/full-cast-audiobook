@@ -16,7 +16,7 @@ if (!databaseUrl) {
   databaseUrl = DEV_FALLBACK;
 }
 
-export const pool = new Pool({
+const pool = new Pool({
   connectionString: databaseUrl,
   max: 25,
   idleTimeoutMillis: 60_000,

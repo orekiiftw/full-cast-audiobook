@@ -7,25 +7,12 @@ export interface SegmentInfo {
   isSceneBreak: boolean;
 }
 
-interface SegmentRun {
-  segments: SegmentInfo[];
-  bufferedParts: string[];
-  bufferedWords: number;
-  nextIndex: number;
-  isLeadInPending: boolean;
-}
-
-interface SegmentLimits {
-  minWords: number;
-  targetWords: number;
-  maxWords: number;
-}
-
-type FlushReason = "scene-break" | "heading";
-
 const EXPLICIT_SCENE_BREAK_RE = /^\s*(\*\s*){3,}\s*$/;
+
 const SCENE_BREAK_MARKERS = new Set(["---", "___"]);
+
 const SENTENCE_BOUNDARY_RE = /(?<!\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|St|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.)(?<=[.!?।॥…])\s+/;
+
 const CLAUSE_BOUNDARY_RE = /(?<=[,;:—–])\s+/;
 
 export function segmentChapter(blocks: BookBlock[]): SegmentInfo[] {
@@ -60,6 +47,14 @@ export function segmentChapter(blocks: BookBlock[]): SegmentInfo[] {
 
 function isSceneBreakLine(text: string): boolean {
   return EXPLICIT_SCENE_BREAK_RE.test(text) || SCENE_BREAK_MARKERS.has(text);
+}
+
+interface SegmentRun {
+  segments: SegmentInfo[];
+  bufferedParts: string[];
+  bufferedWords: number;
+  nextIndex: number;
+  isLeadInPending: boolean;
 }
 
 function flushHeading(run: SegmentRun, text: string): void {
@@ -103,6 +98,12 @@ function needsIsolation(run: SegmentRun, sentenceWords: number, isShortDialogue:
   return !isShortDialogue && endsSentence(run.bufferedParts);
 }
 
+interface SegmentLimits {
+  minWords: number;
+  targetWords: number;
+  maxWords: number;
+}
+
 function limitsFor(run: SegmentRun): SegmentLimits {
   if (!run.isLeadInPending) {
     return { minWords: SEGMENT.MIN_WORDS, targetWords: SEGMENT.TARGET_WORDS, maxWords: SEGMENT.MAX_WORDS };
@@ -118,6 +119,8 @@ function appendPart(run: SegmentRun, text: string): void {
   run.bufferedParts.push(text);
   run.bufferedWords += countWords(text);
 }
+
+type FlushReason = "scene-break" | "heading";
 
 function flushSegment(run: SegmentRun, reason?: FlushReason): void {
   if (run.bufferedParts.length === 0) return;

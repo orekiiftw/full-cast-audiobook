@@ -5,30 +5,22 @@ import { EPUB_LIMITS, PIPELINE } from "../lib/constants";
 import { firstRow } from "../lib/query";
 import { enqueueSegmentJobs, segmentJobId, segmentQueue, type SegmentJobData } from "../queue";
 
-export interface LookaheadAnchor {
-  chapterIndex: number;
-  segmentIndex: number;
-}
-
-interface LookaheadWindowRow {
-  segmentId: string;
-  chapterId: string;
-  chapterIndex: number;
-  segmentIndex: number;
-  status: string;
-}
-
-interface WindowThrottle {
-  shouldEvaluate(throttleKey: string, opts?: { force?: boolean }): boolean;
-}
-
 const LOOKAHEAD_THROTTLE_MS = 2_000;
+
 const PREFETCH_THROTTLE_MS = 10_000;
+
 const MAX_THROTTLE_KEYS = 5_000;
+
 const PRIORITY_LIFT_BATCH_SIZE = 64;
 
 const lookaheadThrottle = createWindowThrottle(LOOKAHEAD_THROTTLE_MS);
+
 const prefetchThrottle = createWindowThrottle(PREFETCH_THROTTLE_MS);
+
+interface LookaheadAnchor {
+  chapterIndex: number;
+  segmentIndex: number;
+}
 
 export async function ensureLookahead(
   bookId: string,
@@ -62,6 +54,46 @@ export async function ensureChapterLookahead(bookId: string, chapterIndex: numbe
     .orderBy(asc(chapters.chapterIndex), asc(segments.segmentIndex));
 
   await promotePendingSegments(windowRows, bookId);
+}
+
+export async function prefetchNextChapter(bookId: string, currentChapterIndex: number): Promise<void> {
+  if (!prefetchThrottle.shouldEvaluate(`${bookId}:${currentChapterIndex}`)) return;
+
+  const currentIncomplete = await firstRow(
+    db
+      .select({ id: segments.id })
+      .from(segments)
+      .innerJoin(chapters, eq(segments.chapterId, chapters.id))
+      .where(
+        and(
+          eq(chapters.bookId, bookId),
+          eq(chapters.chapterIndex, currentChapterIndex),
+          inArray(segments.status, ["queued", "processing", "annotated"]),
+        ),
+      )
+      .limit(1),
+  );
+  if (currentIncomplete) return;
+
+  const nextQueued = await db
+    .select({ id: segments.id })
+    .from(segments)
+    .innerJoin(chapters, eq(segments.chapterId, chapters.id))
+    .where(and(eq(chapters.bookId, bookId), eq(chapters.chapterIndex, currentChapterIndex + 1), eq(segments.status, "queued")))
+    .limit(EPUB_LIMITS.MAX_SEGMENTS_PER_CHAPTER);
+
+  await liftJobPriorities(
+    nextQueued.map((row) => row.id),
+    currentChapterIndex,
+  );
+}
+
+interface LookaheadWindowRow {
+  segmentId: string;
+  chapterId: string;
+  chapterIndex: number;
+  segmentIndex: number;
+  status: string;
 }
 
 function loadLookaheadWindow(bookId: string, anchor: LookaheadAnchor): Promise<LookaheadWindowRow[]> {
@@ -111,36 +143,8 @@ function pendingSegmentIds(windowRows: LookaheadWindowRow[]): string[] {
   return windowRows.filter((row) => row.status === "pending").map((row) => row.segmentId);
 }
 
-export async function prefetchNextChapter(bookId: string, currentChapterIndex: number): Promise<void> {
-  if (!prefetchThrottle.shouldEvaluate(`${bookId}:${currentChapterIndex}`)) return;
-
-  const currentIncomplete = await firstRow(
-    db
-      .select({ id: segments.id })
-      .from(segments)
-      .innerJoin(chapters, eq(segments.chapterId, chapters.id))
-      .where(
-        and(
-          eq(chapters.bookId, bookId),
-          eq(chapters.chapterIndex, currentChapterIndex),
-          inArray(segments.status, ["queued", "processing", "annotated"]),
-        ),
-      )
-      .limit(1),
-  );
-  if (currentIncomplete) return;
-
-  const nextQueued = await db
-    .select({ id: segments.id })
-    .from(segments)
-    .innerJoin(chapters, eq(segments.chapterId, chapters.id))
-    .where(and(eq(chapters.bookId, bookId), eq(chapters.chapterIndex, currentChapterIndex + 1), eq(segments.status, "queued")))
-    .limit(EPUB_LIMITS.MAX_SEGMENTS_PER_CHAPTER);
-
-  await liftJobPriorities(
-    nextQueued.map((row) => row.id),
-    currentChapterIndex,
-  );
+interface WindowThrottle {
+  shouldEvaluate(throttleKey: string, opts?: { force?: boolean }): boolean;
 }
 
 function createWindowThrottle(throttleMs: number): WindowThrottle {

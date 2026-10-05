@@ -1,12 +1,29 @@
 import { env } from "../lib/env";
 import { fetchWithRedirectGuard, redirectFailureMessage, type RedirectGuard } from "../lib/redirectGuard";
-import { errorMessage } from "./client";
+import { errorMessage } from "../lib/errors";
 import { readVerifiedBook } from "./download";
 import { isIpfsCid } from "./safety";
 import type { TorrentCandidate } from "./types";
 
 const IPFS_TIMEOUT_MS = 10 * 60_000;
+
 const IPFS_GATEWAY_HOSTS = ["ipfs.io", "dweb.link", "w3s.link", "nftstorage.link"];
+
+export async function downloadBookFromIpfs(
+  cid: string,
+  onProgress?: (message: string) => void,
+): Promise<{ buffer: Buffer; filename: string } | null> {
+  if (!isIpfsCid(cid)) return null;
+  return (await downloadFromCatalogueNode(cid, onProgress)) ?? downloadFromGateways(cid, onProgress);
+}
+
+export async function downloadCandidateFromIpfs(
+  candidate: TorrentCandidate,
+  onProgress?: (message: string) => void,
+): Promise<{ buffer: Buffer; filename: string } | null> {
+  if (!candidate.ipfs_cid) return null;
+  return downloadBookFromIpfs(candidate.ipfs_cid, onProgress);
+}
 
 function ipfsRedirectGuard(allowedHosts: string[]): RedirectGuard {
   return {
@@ -30,14 +47,6 @@ async function fetchIpfsWithValidatedRedirects(
   headers: Record<string, string> = {},
 ): Promise<Response> {
   return fetchWithRedirectGuard({ url, timeoutMs: IPFS_TIMEOUT_MS, guard: ipfsRedirectGuard(allowedHosts), headers });
-}
-
-export async function downloadBookFromIpfs(
-  cid: string,
-  onProgress?: (message: string) => void,
-): Promise<{ buffer: Buffer; filename: string } | null> {
-  if (!isIpfsCid(cid)) return null;
-  return (await downloadFromCatalogueNode(cid, onProgress)) ?? downloadFromGateways(cid, onProgress);
 }
 
 async function downloadFromCatalogueNode(
@@ -81,12 +90,4 @@ async function downloadFromGateways(
 
   console.warn(`⚠️ IPFS download failed on all gateways${failures.length ? `: ${failures.join(" | ")}` : ""}`);
   return null;
-}
-
-export async function downloadCandidateFromIpfs(
-  candidate: TorrentCandidate,
-  onProgress?: (message: string) => void,
-): Promise<{ buffer: Buffer; filename: string } | null> {
-  if (!candidate.ipfs_cid) return null;
-  return downloadBookFromIpfs(candidate.ipfs_cid, onProgress);
 }

@@ -1,4 +1,4 @@
-export interface AuthFieldProps {
+interface AuthFieldProps {
   id: string;
   label: string;
   type: "email" | "password";

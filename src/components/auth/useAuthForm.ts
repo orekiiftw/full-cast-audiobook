@@ -21,22 +21,6 @@ export interface AuthFormModel {
   submit: (event: React.FormEvent<HTMLFormElement>) => void;
 }
 
-function validate(email: string, password: string): FieldErrors {
-  const errors: FieldErrors = {};
-  const cleanEmail = email.trim();
-  if (!cleanEmail) {
-    errors.email = "Enter your email address.";
-  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-    errors.email = "Enter a valid email address.";
-  }
-  if (!password) {
-    errors.password = "Enter your password.";
-  } else if (password.length < 12) {
-    errors.password = "Password must be at least 12 characters.";
-  }
-  return errors;
-}
-
 export function useAuthForm(onAuthenticated: (user: AuthUser) => void): AuthFormModel {
   const [mode, setMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
@@ -117,4 +101,20 @@ export function useAuthForm(onAuthenticated: (user: AuthUser) => void): AuthForm
     changePassword,
     submit,
   };
+}
+
+function validate(email: string, password: string): FieldErrors {
+  const errors: FieldErrors = {};
+  const cleanEmail = email.trim();
+  if (!cleanEmail) {
+    errors.email = "Enter your email address.";
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    errors.email = "Enter a valid email address.";
+  }
+  if (!password) {
+    errors.password = "Enter your password.";
+  } else if (password.length < 12) {
+    errors.password = "Password must be at least 12 characters.";
+  }
+  return errors;
 }

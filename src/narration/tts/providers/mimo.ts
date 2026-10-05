@@ -5,33 +5,20 @@ import { TtsApiError, TtsConfigError } from "../errors";
 import { parseRetryAfterMs, postSpeechRequest, synthesizeWithRetries } from "../http";
 import { applyPronunciationDict } from "../pronunciation";
 import { runWithTtsSlot } from "../rateLimit";
-import type { DeliveryHint, TTSProvider } from "../types";
+import type { TTSProvider } from "../types";
 
 const MIMO_TTS_MODEL = process.env.MIMO_TS_MODEL || DEFAULT_TS_MODEL;
-const MIMO_BASE_URL = (process.env.MIMO_TS_BASE_URL || MIMO_TS_BASE_URL).replace(/\/+$/, "");
-const TTS_RESPONSE_CAP = 64 * 1024 * 1024;
-const PROVIDER_LABEL = "MiMo TTS";
 
-interface MiMoChatResponse {
-  choices?: Array<{
-    message?: {
-      content?: string;
-      audio?: { id?: string; data?: string };
-    };
-  }>;
-  error?: { message?: string; code?: string; type?: string };
-}
+const MIMO_BASE_URL = (process.env.MIMO_TS_BASE_URL || MIMO_TS_BASE_URL).replace(/\/+$/, "");
+
+const TTS_RESPONSE_CAP = 64 * 1024 * 1024;
+
+const PROVIDER_LABEL = "MiMo TTS";
 
 class MiMoApiError extends TtsApiError {}
 
 export class MiMoTSProvider implements TTSProvider {
-  async speak(
-    text: string,
-    voiceName: string,
-    stylePrompt: string,
-    pronunciationDict?: Record<string, string>,
-    _delivery?: DeliveryHint,
-  ): Promise<Buffer> {
+  async speak(text: string, voiceName: string, stylePrompt: string, pronunciationDict?: Record<string, string>): Promise<Buffer> {
     return runWithTtsSlot(() => this.speakInternal(text, voiceName, stylePrompt, pronunciationDict));
   }
 
@@ -103,6 +90,16 @@ export class MiMoTSProvider implements TTSProvider {
     }
     return apiKey;
   }
+}
+
+interface MiMoChatResponse {
+  choices?: Array<{
+    message?: {
+      content?: string;
+      audio?: { id?: string; data?: string };
+    };
+  }>;
+  error?: { message?: string; code?: string; type?: string };
 }
 
 async function readResponseJson(res: Response): Promise<{ json: MiMoChatResponse | null; readError?: Error }> {

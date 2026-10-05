@@ -1,17 +1,17 @@
 export const DEFAULT_COMMAND_TIMEOUT_MS = 5 * 60_000;
 
-interface ProcessResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-  success: boolean;
-}
-
 export function escapeFfmpegConcatPath(filePath: string): string {
   if (/[\n\r\\]/.test(filePath)) {
     throw new Error(`Unsafe path for ffmpeg concat list: ${filePath}`);
   }
   return filePath.replace(/'/g, "'\\''");
+}
+
+interface ProcessResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  success: boolean;
 }
 
 export async function runProcess(args: string[], timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS, cwd?: string): Promise<ProcessResult> {

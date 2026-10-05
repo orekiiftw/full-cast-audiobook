@@ -1,6 +1,6 @@
 import { Icon } from "../ui";
 
-export type TransportControlsVariant = "collapsed" | "expanded";
+type TransportControlsVariant = "collapsed" | "expanded";
 
 interface TransportControlsProps {
   variant: TransportControlsVariant;

@@ -2,8 +2,6 @@ import { json } from "./response";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
-type OriginVerdict = "allowed" | "denied" | "invalid";
-
 export function csrfGuard(req: Request): Response | null {
   if (req.headers.get("sec-fetch-site") === "cross-site") {
     return forbidden("cross-site request blocked");
@@ -27,6 +25,8 @@ export function csrfGuard(req: Request): Response | null {
       return forbidden("origin not allowed");
   }
 }
+
+type OriginVerdict = "allowed" | "denied" | "invalid";
 
 function classifyOrigin(origin: string, requestUrl: string): OriginVerdict {
   try {

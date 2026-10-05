@@ -1,16 +1,15 @@
 import { unzipSync, strFromU8 } from "fflate";
 import { EPUB_LIMITS } from "../lib/constants";
-
-interface ZipCentralDirectory {
-  entryCount: number;
-  offset: number;
-}
+import { errorMessage } from "../lib/errors";
 
 export type ArchiveEntries = Record<string, Uint8Array>;
 
 const ZIP_EOCD_SIGNATURE = 0x06054b50;
+
 const ZIP_CENTRAL_DIR_SIGNATURE = 0x02014b50;
+
 const ZIP_ZIP64_LOCATOR_SIGNATURE = 0x07064b50;
+
 const BYTES_PER_MEGABYTE = 1024 * 1024;
 
 export function openEpubArchive(buffer: Buffer): ArchiveEntries {
@@ -19,7 +18,7 @@ export function openEpubArchive(buffer: Buffer): ArchiveEntries {
   try {
     return unzipSync(new Uint8Array(buffer));
   } catch (err) {
-    throw new Error(`Invalid EPUB: not a valid ZIP archive (${err instanceof Error ? err.message : String(err)})`);
+    throw new Error(`Invalid EPUB: not a valid ZIP archive (${errorMessage(err)})`);
   }
 }
 
@@ -84,6 +83,11 @@ function findEndOfCentralDirectory(buffer: Buffer): number {
 
 function rejectMissingCentralDirectory(): never {
   throw new Error("Invalid EPUB: not a valid ZIP archive (missing end of central directory)");
+}
+
+interface ZipCentralDirectory {
+  entryCount: number;
+  offset: number;
 }
 
 function readCentralDirectoryHeader(buffer: Buffer, eocd: number): ZipCentralDirectory {

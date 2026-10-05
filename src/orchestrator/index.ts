@@ -7,10 +7,8 @@ import { resumePendingWork } from "./recovery";
 
 export { queueBookIngestion } from "./ingestion";
 export { restitchChapterInBackground } from "./stitch";
-export { runPipelineSweep } from "./sweep";
-export { resumePendingWork } from "./recovery";
 export { deleteBook, retryFailedBook } from "./lifecycle";
-export { ensureLookahead, ensureChapterLookahead, prefetchNextChapter, type LookaheadAnchor } from "./lookahead";
+export { ensureLookahead, ensureChapterLookahead, prefetchNextChapter } from "./lookahead";
 
 export async function startPipeline(): Promise<void> {
   await pingRedis();

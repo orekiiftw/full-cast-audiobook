@@ -5,8 +5,6 @@ import { usePlaybackProgressSync, type PlaybackTarget } from "./usePlaybackProgr
 import { findNextPlayableChapter, resolveStartSegmentIndex } from "./playbackSelection";
 import type { Book, Chapter, Segment } from "../types/api";
 
-export type ShowToast = (message: string, tone?: "info" | "error") => void;
-
 export interface PlaybackSession {
   activeBook: Book | null;
   activeChapter: Chapter | null;
@@ -25,26 +23,12 @@ export interface PlaybackSession {
   handleChapterEnded: () => Promise<void>;
 }
 
+type ShowToast = (message: string, tone?: "info" | "error") => void;
+
 interface LatestPlayback {
   book: Book | null;
   chapter: Chapter | null;
   segmentIndex: number;
-}
-
-async function loadChapterSegments(chapterId: string, audioUnlocked: Promise<void>): Promise<Segment[]> {
-  const [response] = await Promise.all([apiFetch(`/api/chapters/${chapterId}/segments`), audioUnlocked]);
-  if (!response.ok) throw new Error("Failed to load chapter segments");
-
-  const data = (await response.json()) as { segments?: Segment[] };
-  return data.segments ?? [];
-}
-
-async function loadBookChapters(bookId: string): Promise<Chapter[]> {
-  const response = await apiFetch(`/api/books/${bookId}`);
-  if (!response.ok) return [];
-
-  const data = (await response.json()) as { chapters?: Chapter[] };
-  return data.chapters ?? [];
 }
 
 export function usePlaybackSession(showToast: ShowToast): PlaybackSession {
@@ -151,4 +135,20 @@ export function usePlaybackSession(showToast: ShowToast): PlaybackSession {
     playChapter,
     handleChapterEnded,
   };
+}
+
+async function loadChapterSegments(chapterId: string, audioUnlocked: Promise<void>): Promise<Segment[]> {
+  const [response] = await Promise.all([apiFetch(`/api/chapters/${chapterId}/segments`), audioUnlocked]);
+  if (!response.ok) throw new Error("Failed to load chapter segments");
+
+  const data = (await response.json()) as { segments?: Segment[] };
+  return data.segments ?? [];
+}
+
+async function loadBookChapters(bookId: string): Promise<Chapter[]> {
+  const response = await apiFetch(`/api/books/${bookId}`);
+  if (!response.ok) return [];
+
+  const data = (await response.json()) as { chapters?: Chapter[] };
+  return data.chapters ?? [];
 }

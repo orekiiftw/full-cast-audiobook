@@ -9,7 +9,7 @@ interface UseLineRegenerationOptions {
   restartSegmentIfActive: (freshSegments: Segment[], segmentId: string) => void;
 }
 
-export interface LineRegeneration {
+interface LineRegeneration {
   isModalOpen: boolean;
   instruction: string;
   isRegenerating: boolean;

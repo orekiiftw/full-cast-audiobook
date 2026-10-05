@@ -4,7 +4,30 @@ import { readStreamWithCap } from "../lib/readStream";
 import type { TorrentCandidate } from "../torrent";
 
 const CATALOGUE_TIMEOUT_MS = 12_000;
+
 const CATALOGUE_JSON_CAP = 8 * 1024 * 1024;
+
+const catalogueRedirectGuard: RedirectGuard = {
+  approve: (target, { initialUrl }) => {
+    if (target.hostname !== initialUrl.hostname) {
+      throw new Error(`Catalogue redirect to unapproved host: ${target.hostname}`);
+    }
+    if (target.protocol !== "https:" && target.protocol !== initialUrl.protocol) {
+      throw new Error(`Catalogue redirect to insecure protocol: ${target.protocol}`);
+    }
+    return target;
+  },
+  fail: (failure) => new Error(redirectFailureMessage("Catalogue", failure)),
+};
+
+export async function searchCatalogueTorrentCandidates(title: string, author?: string, limit = 10): Promise<TorrentCandidate[]> {
+  const withAuthor = author ? await searchCatalogue(title, author, limit) : [];
+  if (withAuthor.length) return mapCandidates(withAuthor);
+
+  const titleOnly = await searchCatalogue(title, undefined, limit);
+  if (!titleOnly.length || !author) return mapCandidates(titleOnly);
+  return mapCandidates([...titleOnly].sort(byAuthorOverlap(author)));
+}
 
 interface CatalogueHit {
   md5: string;
@@ -16,15 +39,6 @@ interface CatalogueHit {
   magnet?: string | null;
   torrent_paths?: string[];
   ipfs_cid?: string | null;
-}
-
-export async function searchCatalogueTorrentCandidates(title: string, author?: string, limit = 10): Promise<TorrentCandidate[]> {
-  const withAuthor = author ? await searchCatalogue(title, author, limit) : [];
-  if (withAuthor.length) return mapCandidates(withAuthor);
-
-  const titleOnly = await searchCatalogue(title, undefined, limit);
-  if (!titleOnly.length || !author) return mapCandidates(titleOnly);
-  return mapCandidates([...titleOnly].sort(byAuthorOverlap(author)));
 }
 
 function byAuthorOverlap(author: string): (a: CatalogueHit, b: CatalogueHit) => number {
@@ -78,19 +92,6 @@ async function fetchCatalogue(url: string, token: string): Promise<Response> {
     headers: { Authorization: `Bearer ${token}` },
   });
 }
-
-const catalogueRedirectGuard: RedirectGuard = {
-  approve: (target, { initialUrl }) => {
-    if (target.hostname !== initialUrl.hostname) {
-      throw new Error(`Catalogue redirect to unapproved host: ${target.hostname}`);
-    }
-    if (target.protocol !== "https:" && target.protocol !== initialUrl.protocol) {
-      throw new Error(`Catalogue redirect to insecure protocol: ${target.protocol}`);
-    }
-    return target;
-  },
-  fail: (failure) => new Error(redirectFailureMessage("Catalogue", failure)),
-};
 
 function mapCandidates(hits: CatalogueHit[]): TorrentCandidate[] {
   const candidates: TorrentCandidate[] = [];

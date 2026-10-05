@@ -12,20 +12,12 @@ const SEGMENT_JOB_OPTIONS = {
 } satisfies Partial<JobsOptions>;
 
 const SEGMENT_JOB_CHUNK_SIZE = 1000;
+
 const SEGMENT_JOB_CLEAR_BATCH_SIZE = 64;
+
 const STITCH_PENDING_TTL_MS = 5 * 60_000;
 
-async function clearTerminalJob<DataType, ResultType, NameType extends string>(
-  queue: Queue<DataType, ResultType, NameType>,
-  jobId: string,
-): Promise<void> {
-  const existing = await queue.getJob(jobId);
-  if (!existing) return;
-  const state = await existing.getState();
-  if (state === "failed" || state === "completed") {
-    await existing.remove().catch(() => {});
-  }
-}
+const stitchPendingKey = (chapterId: string): string => `narratea:stitch-pending:${chapterId}`;
 
 export async function enqueueIngestion(bookId: string, source: IngestionJobData["source"]): Promise<void> {
   const jobId = ingestJobId(bookId);
@@ -76,14 +68,6 @@ export async function enqueueStitch(data: StitchJobData): Promise<void> {
   await markStitchPending(data.chapterId);
 }
 
-const stitchPendingKey = (chapterId: string): string => `narratea:stitch-pending:${chapterId}`;
-
-export async function markStitchPending(chapterId: string): Promise<void> {
-  await redis
-    .set(stitchPendingKey(chapterId), "1", "PX", STITCH_PENDING_TTL_MS)
-    .catch((err) => console.warn("markStitchPending failed:", (err as Error).message));
-}
-
 export async function discardStitchPending(chapterId: string): Promise<void> {
   await redis.del(stitchPendingKey(chapterId)).catch((err) => console.warn("discardStitchPending failed:", (err as Error).message));
 }
@@ -94,4 +78,22 @@ export async function consumeStitchPending(chapterId: string): Promise<boolean> 
     return 0;
   });
   return removed === 1;
+}
+
+async function clearTerminalJob<DataType, ResultType, NameType extends string>(
+  queue: Queue<DataType, ResultType, NameType>,
+  jobId: string,
+): Promise<void> {
+  const existing = await queue.getJob(jobId);
+  if (!existing) return;
+  const state = await existing.getState();
+  if (state === "failed" || state === "completed") {
+    await existing.remove().catch(() => {});
+  }
+}
+
+async function markStitchPending(chapterId: string): Promise<void> {
+  await redis
+    .set(stitchPendingKey(chapterId), "1", "PX", STITCH_PENDING_TTL_MS)
+    .catch((err) => console.warn("markStitchPending failed:", (err as Error).message));
 }

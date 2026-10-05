@@ -3,13 +3,6 @@ import { BookNotFoundError, ProviderUnavailableError } from "../errors";
 import { AcquiredBook, BookDetails, BookFormat, BookProvider, BookResult, SearchQuery } from "../types";
 import { acquireFirstUsableEpub, parseYear } from "./shared";
 
-interface LibgenSearchContext {
-  providerName: string;
-  baseUrl: string;
-  wantedFormats: Set<string>;
-  limit: number;
-}
-
 const MAX_LIBGEN_SEARCH_BYTES = 8 * 1024 * 1024;
 
 export class LibgenProvider implements BookProvider {
@@ -95,6 +88,13 @@ export async function fetchEpubFromLibgen(
   onProgress?: (msg: string) => void,
 ): Promise<{ buffer: Buffer; filename: string } | null> {
   return acquireFirstUsableEpub(new LibgenProvider(), "LibGen", title, author, onProgress);
+}
+
+interface LibgenSearchContext {
+  providerName: string;
+  baseUrl: string;
+  wantedFormats: Set<string>;
+  limit: number;
 }
 
 function parseLibgenSearchPage(html: string, context: LibgenSearchContext): BookResult[] {

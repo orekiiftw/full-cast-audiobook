@@ -1,6 +1,6 @@
 import type { AuthUser } from "../auth";
 
-export type RouteParams = Readonly<Record<string, string>>;
+type RouteParams = Readonly<Record<string, string>>;
 
 export interface PublicRouteContext {
   req: Request;
@@ -14,18 +14,20 @@ export interface RouteContext extends Omit<PublicRouteContext, "user"> {
   user: AuthUser;
 }
 
-export type PublicRouteHandler = (ctx: PublicRouteContext) => Promise<Response>;
+type PublicRouteHandler = (ctx: PublicRouteContext) => Promise<Response>;
+
 export type RouteHandler = (ctx: RouteContext) => Promise<Response>;
 
 export type PublicRouteTable = Record<string, PublicRouteHandler>;
+
 export type RouteTable = Record<string, RouteHandler>;
 
-export interface RouteMatch<Handler> {
+const PATH_PARAM_RE = /^:([A-Za-z][A-Za-z0-9_]*)$/;
+
+interface RouteMatch<Handler> {
   handler: Handler;
   params: RouteParams;
 }
-
-const PATH_PARAM_RE = /^:([A-Za-z][A-Za-z0-9_]*)$/;
 
 export function matchRoute<Handler extends RouteHandler | PublicRouteHandler>(
   table: Record<string, Handler>,

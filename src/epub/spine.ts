@@ -11,6 +11,8 @@ interface HeldPage {
   pageWords: number;
 }
 
+const NON_PROSE_PAGE_MAX_WORDS = 50;
+
 interface SpineReadState {
   accepted: SpinePage[];
   held: HeldPage[];
@@ -18,8 +20,6 @@ interface SpineReadState {
   totalTextBytes: number;
   totalPageWords: number;
 }
-
-const NON_PROSE_PAGE_MAX_WORDS = 50;
 
 export function readSpinePages(entries: ArchiveEntries, readingOrder: string[], bookTitle: string): SpinePage[] {
   const state: SpineReadState = { accepted: [], held: [], inBackMatter: false, totalTextBytes: 0, totalPageWords: 0 };

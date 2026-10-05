@@ -43,7 +43,7 @@ mock.module("../../db", () => ({
   db: mockDb,
   pool: { connect: async () => ({ release: () => {} }), on: () => {} },
 }));
-mock.module("../ownership", () => ({
+mock.module("../../books/ownership", () => ({
   ownedBook: async () => true,
 }));
 mock.module("../../queue", () => ({

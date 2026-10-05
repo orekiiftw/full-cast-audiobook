@@ -1,7 +1,7 @@
 import { downloadBookFromTorrent, searchBookTorrent } from "../../torrent";
 import { BookNotFoundError } from "../errors";
 import { AcquiredBook, BookDetails, BookProvider, BookResult, SearchQuery } from "../types";
-import { bufferToStream } from "./shared";
+import { bufferToStream } from "../../lib/readStream";
 
 export class TorrentProvider implements BookProvider {
   readonly name = "torrent";

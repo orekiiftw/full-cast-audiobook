@@ -3,7 +3,18 @@ import { fetchWithRedirectGuard, redirectFailureMessage, type RedirectGuard } fr
 import { readStreamWithCap } from "../../lib/readStream";
 import { BookNotFoundError, ProviderUnavailableError } from "../errors";
 import { AcquiredBook, BookDetails, BookMirror, BookProvider, BookResult, SearchQuery } from "../types";
-import { acquireFirstUsableEpub, bufferToStream, parseYear, readProviderJson } from "./shared";
+import { acquireFirstUsableEpub, parseYear, readProviderJson } from "./shared";
+import { bufferToStream } from "../../lib/readStream";
+import { isAllowedHost } from "../../lib/hosts";
+
+const ARCHIVE_ORG_REDIRECT_HOPS = 5;
+
+const ARCHIVE_DOWNLOAD_TIMEOUT_MS = 90_000;
+
+const ARCHIVE_JSON_TIMEOUT_MS = 10_000;
+
+const ARCHIVE_ORG_ACQUIREABLE_EPUB_FILTERS =
+  "mediatype:(texts)+AND+format:(EPUB)+AND+-collection:(inlibrary)+AND+-collection:(printdisabled)";
 
 interface ArchiveSearchDoc {
   identifier: string;
@@ -24,15 +35,6 @@ interface ArchiveMetadataResponse {
 }
 
 type ArchiveMirror = BookMirror & { url: string };
-
-type ArchiveEpubFile = { name: string; size?: number };
-
-const ARCHIVE_ORG_REDIRECT_HOPS = 5;
-const ARCHIVE_DOWNLOAD_TIMEOUT_MS = 90_000;
-const ARCHIVE_JSON_TIMEOUT_MS = 10_000;
-
-const ARCHIVE_ORG_ACQUIREABLE_EPUB_FILTERS =
-  "mediatype:(texts)+AND+format:(EPUB)+AND+-collection:(inlibrary)+AND+-collection:(printdisabled)";
 
 export class ArchiveOrgProvider implements BookProvider {
   readonly name = "archive-org";
@@ -184,6 +186,8 @@ function mapArchiveDoc(providerName: string, query: SearchQuery, doc: ArchiveSea
   };
 }
 
+type ArchiveEpubFile = { name: string; size?: number };
+
 function findArchiveEpubFile(files: Array<{ name?: string; size?: number }>, id: string): ArchiveEpubFile {
   const epub = files.find((file): file is ArchiveEpubFile => {
     if (typeof file.name !== "string") return false;
@@ -210,7 +214,7 @@ function isTrustedArchiveOrgUrl(url: URL): boolean {
 
 function isArchiveOrgHost(host: string): boolean {
   const normalizedHost = host.toLowerCase();
-  return normalizedHost === "archive.org" || normalizedHost.endsWith(".archive.org");
+  return isAllowedHost(normalizedHost, ["archive.org"]);
 }
 
 async function fetchArchiveJson(url: string, what: string, provider: string): Promise<Response> {

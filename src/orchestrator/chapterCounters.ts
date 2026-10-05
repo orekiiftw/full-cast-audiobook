@@ -2,22 +2,13 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "../db";
 import { chapters } from "../schema";
 import { firstRow } from "../lib/query";
+import type { ChapterCounters } from "../lib/chapterStatus";
 
-export const CHAPTER_COUNTERS = {
+const CHAPTER_COUNTERS = {
   voicedCount: chapters.voicedCount,
   failedCount: chapters.failedCount,
   totalCount: chapters.totalCount,
 };
-
-export interface ChapterCounters {
-  voicedCount: number;
-  failedCount: number;
-  totalCount: number;
-}
-
-export function shouldEnqueueStitch(counters: ChapterCounters | undefined): boolean {
-  return !!counters && counters.totalCount > 0 && counters.voicedCount + counters.failedCount >= counters.totalCount;
-}
 
 export async function incrementVoicedCount(chapterId: string): Promise<ChapterCounters | undefined> {
   return firstRow(
@@ -37,6 +28,27 @@ export async function incrementFailedCount(chapterId: string): Promise<ChapterCo
       .where(eq(chapters.id, chapterId))
       .returning(CHAPTER_COUNTERS),
   );
+}
+
+export async function repairRegeneratedChapterCounters(chapterId: string, previousStatus: string): Promise<ChapterCounters | undefined> {
+  if (previousStatus === "failed") {
+    return firstRow(
+      db
+        .update(chapters)
+        .set({
+          voicedCount: sql`${chapters.voicedCount} + 1`,
+          failedCount: sql`GREATEST(${chapters.failedCount} - 1, 0)`,
+        })
+        .where(eq(chapters.id, chapterId))
+        .returning(CHAPTER_COUNTERS),
+    );
+  }
+
+  if (previousStatus === "voiced") {
+    return firstRow(db.select(CHAPTER_COUNTERS).from(chapters).where(eq(chapters.id, chapterId)));
+  }
+
+  return incrementVoicedCount(chapterId);
 }
 
 export async function recomputeChapterCounters(chapterId: string): Promise<ChapterCounters | undefined> {

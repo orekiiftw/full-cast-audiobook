@@ -7,6 +7,20 @@ import { useSegmentSources } from "./useSegmentSources";
 import { useSegmentPlaybackRefs, useSegmentSync } from "./useSegmentSync";
 import type { AudioTransport } from "./useAudioTransport";
 
+export interface SegmentPlayback {
+  isBufferingNext: boolean;
+  canGoPrev: boolean;
+  canGoNext: boolean;
+  togglePlayPause: () => void;
+  goToSegment: (index: number) => void;
+  goToPrev: () => void;
+  goToNext: () => void;
+  seekBy: (seconds: number) => void;
+  seekToRatio: (ratio: number) => void;
+  handleSegmentEnded: () => void;
+  restartSegmentIfActive: (freshSegments: Segment[], segmentId: string) => void;
+}
+
 interface UseSegmentPlaybackOptions {
   bookId: string;
   chapterId: string;
@@ -20,20 +34,6 @@ interface UseSegmentPlaybackOptions {
   setPositionMs: (position: number) => void;
   audio: AudioTransport;
   onChapterEnded?: () => void;
-}
-
-export interface SegmentPlayback {
-  isBufferingNext: boolean;
-  canGoPrev: boolean;
-  canGoNext: boolean;
-  togglePlayPause: () => void;
-  goToSegment: (index: number) => void;
-  goToPrev: () => void;
-  goToNext: () => void;
-  seekBy: (seconds: number) => void;
-  seekToRatio: (ratio: number) => void;
-  handleSegmentEnded: () => void;
-  restartSegmentIfActive: (freshSegments: Segment[], segmentId: string) => void;
 }
 
 export function useSegmentPlayback({

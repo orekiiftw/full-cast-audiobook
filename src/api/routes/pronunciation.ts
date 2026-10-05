@@ -1,31 +1,24 @@
-import { and, count, eq, ne } from "drizzle-orm";
-import { db } from "../../db";
-import { pronunciationDict } from "../../schema";
+import { upsertPronunciationTerm } from "../../narration/pronunciation";
 import { json } from "../response";
 import { type RouteContext, type RouteTable } from "../route";
-import { invalidateBookVoiceContextClusterwide } from "../../queue";
-import { firstRow } from "../../lib/query";
 import { ValidationError, requireString, requireUuid } from "../../lib/validators";
 import { readJsonWithLimit } from "../body";
-import { ownedBook } from "../ownership";
+import { ownedBook } from "../../books/ownership";
 
 const MAX_TERM_LENGTH = 200;
+
 const MAX_HINT_LENGTH = 200;
-const MAX_TERMS_PER_BOOK = 500;
 
 export const pronunciationRoutes: RouteTable = {
-  "POST /api/books/:bookId/pronunciation": upsertPronunciationTerm,
+  "POST /api/books/:bookId/pronunciation": savePronunciationTerm,
 };
 
-async function upsertPronunciationTerm({ req, user, params }: RouteContext): Promise<Response> {
+async function savePronunciationTerm({ req, user, params }: RouteContext): Promise<Response> {
   const bookId = requireUuid(params.bookId, "bookId");
   if (!(await ownedBook(user.id, bookId))) return json({ error: "Book not found" }, 404);
 
   const { term, phoneticHint } = await readPronunciationTerm(req);
-  await assertTermCapacity(bookId, term);
-  await saveTerm(bookId, term, phoneticHint);
-
-  invalidateBookVoiceContextClusterwide(bookId);
+  await upsertPronunciationTerm(bookId, term, phoneticHint);
 
   return json({ success: true });
 }
@@ -40,26 +33,4 @@ async function readPronunciationTerm(req: Request): Promise<{ term: string; phon
   }
 
   return { term, phoneticHint };
-}
-
-async function assertTermCapacity(bookId: string, term: string): Promise<void> {
-  const otherTerms = await firstRow(
-    db
-      .select({ value: count() })
-      .from(pronunciationDict)
-      .where(and(eq(pronunciationDict.bookId, bookId), ne(pronunciationDict.term, term))),
-  );
-  if ((otherTerms?.value ?? 0) >= MAX_TERMS_PER_BOOK) {
-    throw new ValidationError(`A book cannot have more than ${MAX_TERMS_PER_BOOK} pronunciation terms`);
-  }
-}
-
-async function saveTerm(bookId: string, term: string, phoneticHint: string): Promise<void> {
-  await db
-    .insert(pronunciationDict)
-    .values({ bookId, term, phoneticHint })
-    .onConflictDoUpdate({
-      target: [pronunciationDict.bookId, pronunciationDict.term],
-      set: { phoneticHint },
-    });
 }

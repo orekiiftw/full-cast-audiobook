@@ -10,7 +10,7 @@ import type {
   SegmentReadyEvent,
 } from "../../types/api";
 
-export interface SegmentProgressEntry {
+interface SegmentProgressEntry {
   total: number;
   done: number;
 }
@@ -35,52 +35,6 @@ export function isBookWorking(book: Book): boolean {
 
 export function resumePositionFor(playbackState: PlaybackState | null, chapterId: string): number {
   return playbackState?.chapterId === chapterId ? playbackState.positionMs : 0;
-}
-
-export function withBookStatus(data: DetailData | null, status: BookStatus): DetailData | null {
-  if (!data) return data;
-  return { ...data, book: { ...data.book, status } };
-}
-
-export function withChapterStatus(data: DetailData | null, event: ChapterStatusEvent): DetailData | null {
-  if (!data) return data;
-  return {
-    ...data,
-    chapters: data.chapters.map((chapter) =>
-      chapter.id === event.chapterId
-        ? {
-            ...chapter,
-            status: event.status,
-            durationMs: event.durationMs ?? chapter.durationMs,
-            audioR2Key: event.audioR2Key ?? chapter.audioR2Key,
-          }
-        : chapter,
-    ),
-  };
-}
-
-export function withSegmentProgress(progress: SegmentProgress, event: SegmentReadyEvent): SegmentProgress {
-  const current = progress[event.chapterId] || { total: 0, done: 0 };
-  const total = event.total > 0 ? event.total : current.total;
-  return {
-    ...progress,
-    [event.chapterId]: {
-      total,
-      done: total > 0 ? Math.min(total, event.done) : event.done,
-    },
-  };
-}
-
-export function withPartialReadyChapter(data: DetailData | null, chapterId: string): DetailData | null {
-  if (!data) return data;
-  return {
-    ...data,
-    chapters: data.chapters.map((chapter) => {
-      if (chapter.id !== chapterId) return chapter;
-      if (chapter.status === "ready" || chapter.status === "partial_ready" || chapter.status === "failed") return chapter;
-      return { ...chapter, status: "partial_ready" as Chapter["status"] };
-    }),
-  };
 }
 
 interface DetailEventTargets {
@@ -122,4 +76,50 @@ export function applyPipelineEvent(payload: PipelineEvent, targets: DetailEventT
     targets.setSegmentProgress((prev) => withSegmentProgress(prev, payload));
     targets.setData((prev) => withPartialReadyChapter(prev, payload.chapterId));
   }
+}
+
+function withBookStatus(data: DetailData | null, status: BookStatus): DetailData | null {
+  if (!data) return data;
+  return { ...data, book: { ...data.book, status } };
+}
+
+function withChapterStatus(data: DetailData | null, event: ChapterStatusEvent): DetailData | null {
+  if (!data) return data;
+  return {
+    ...data,
+    chapters: data.chapters.map((chapter) =>
+      chapter.id === event.chapterId
+        ? {
+            ...chapter,
+            status: event.status,
+            durationMs: event.durationMs ?? chapter.durationMs,
+            audioR2Key: event.audioR2Key ?? chapter.audioR2Key,
+          }
+        : chapter,
+    ),
+  };
+}
+
+function withSegmentProgress(progress: SegmentProgress, event: SegmentReadyEvent): SegmentProgress {
+  const current = progress[event.chapterId] || { total: 0, done: 0 };
+  const total = event.total > 0 ? event.total : current.total;
+  return {
+    ...progress,
+    [event.chapterId]: {
+      total,
+      done: total > 0 ? Math.min(total, event.done) : event.done,
+    },
+  };
+}
+
+function withPartialReadyChapter(data: DetailData | null, chapterId: string): DetailData | null {
+  if (!data) return data;
+  return {
+    ...data,
+    chapters: data.chapters.map((chapter) => {
+      if (chapter.id !== chapterId) return chapter;
+      if (chapter.status === "ready" || chapter.status === "partial_ready" || chapter.status === "failed") return chapter;
+      return { ...chapter, status: "partial_ready" as Chapter["status"] };
+    }),
+  };
 }

@@ -30,12 +30,17 @@ const QUEUE_PREFIX = "narratea";
 export const queueOptions = { connection: redisOptions, prefix: QUEUE_PREFIX };
 
 export const ingestionQueue = new Queue<IngestionJobData>("ingestion", queueOptions);
+
 export const segmentQueue = new Queue<SegmentJobData>("segments", queueOptions);
+
 export const stitchQueue = new Queue<StitchJobData>("stitch", queueOptions);
+
 export const maintenanceQueue = new Queue("maintenance", queueOptions);
 
 export const ingestJobId = (bookId: string): string => bookId;
+
 export const segmentJobId = (segmentId: string): string => segmentId;
+
 export const stitchJobId = (chapterId: string): string => chapterId;
 
 const JOB_REMOVAL_BATCH_SIZE = 128;

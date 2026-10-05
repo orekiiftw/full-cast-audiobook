@@ -12,24 +12,20 @@ import {
   segmentJobId,
   segmentQueue,
 } from "../queue";
-import { incrementFailedCount, shouldEnqueueStitch } from "./chapterCounters";
+import { incrementFailedCount } from "./chapterCounters";
+import { isChapterComplete } from "../lib/chapterStatus";
 
 const LIVE_JOB_STATES = new Set(["wait", "delayed", "prioritized", "active", "waiting-children"]);
 
 const ORPHANED_SEGMENT_LIMIT = 500;
-const STRANDED_QUEUED_LIMIT = 200;
-const REFILL_LIMIT = 2_000;
-const STITCH_CANDIDATE_LIMIT = 500;
-const STUCK_INGESTION_LIMIT = 200;
 
-interface MidflightSegment {
-  segmentId: string;
-  chapterId: string;
-  bookId: string;
-  chapterIndex: number;
-  segmentIndex: number;
-  attempts: number;
-}
+const STRANDED_QUEUED_LIMIT = 200;
+
+const REFILL_LIMIT = 2_000;
+
+const STITCH_CANDIDATE_LIMIT = 500;
+
+const STUCK_INGESTION_LIMIT = 200;
 
 export function queuedSegmentsQuery(afterSegmentId?: string) {
   return db
@@ -81,6 +77,15 @@ async function requeueOrphanedMidflightSegments(): Promise<void> {
   }
 }
 
+interface MidflightSegment {
+  segmentId: string;
+  chapterId: string;
+  bookId: string;
+  chapterIndex: number;
+  segmentIndex: number;
+  attempts: number;
+}
+
 async function resolveOrphanedSegment(row: MidflightSegment): Promise<void> {
   if (await isLockHeld(`regen:${row.segmentId}`)) return;
 
@@ -108,7 +113,7 @@ async function failOrphanedSegment(row: MidflightSegment, jobState: string, atte
 
   if (newlyFailed.length > 0) {
     const counters = await incrementFailedCount(row.chapterId);
-    if (shouldEnqueueStitch(counters)) {
+    if (isChapterComplete(counters)) {
       await enqueueStitch({ bookId: row.bookId, chapterId: row.chapterId, chapterIndex: row.chapterIndex });
     }
   }

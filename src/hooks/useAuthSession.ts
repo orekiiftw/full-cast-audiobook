@@ -5,7 +5,7 @@ import { resetSharedAudio } from "../lib/sharedAudio";
 import { fetchAuthenticatedUser, preloadLibrary, requestLogout } from "./sessionBootstrap";
 import type { AuthUser, Book } from "../types/api";
 
-export type AuthStatus = "loading" | "authenticated" | "anonymous";
+type AuthStatus = "loading" | "authenticated" | "anonymous";
 
 export function useAuthSession() {
   const [authStatus, setAuthStatus] = useState<AuthStatus>("loading");

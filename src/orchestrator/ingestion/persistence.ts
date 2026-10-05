@@ -11,18 +11,6 @@ export interface StoredEpub {
   uploadedInThisRun: boolean;
 }
 
-export interface MetadataWriteOutcome {
-  bookStillExists: boolean;
-}
-
-interface SegmentInsert {
-  chapterId: string;
-  segmentIndex: number;
-  rawText: string;
-  status: "pending";
-  isSceneBreak: number;
-}
-
 const SEGMENT_INSERT_BATCH_SIZE = 2_000;
 
 export async function uploadEpubIfMissing(bookId: string, epubBuffer: Buffer, existingEpubR2Key: string | null): Promise<StoredEpub> {
@@ -39,6 +27,10 @@ export async function purgeUploadedEpub(bookId: string, storedEpub: StoredEpub):
   await deleteFile(storedEpub.epubR2Key).catch((err) =>
     console.warn(`Could not purge EPUB of book deleted mid-ingestion (${bookId}):`, err),
   );
+}
+
+interface MetadataWriteOutcome {
+  bookStillExists: boolean;
 }
 
 export async function persistBookMetadata(bookId: string, identity: BookIdentity, epubR2Key: string): Promise<MetadataWriteOutcome> {
@@ -98,6 +90,14 @@ export async function insertChapterRows(bookId: string, planned: PlannedChapter[
     .returning({ id: chapters.id, chapterIndex: chapters.chapterIndex });
 
   return new Map(chapterRows.map((row) => [row.chapterIndex, row.id]));
+}
+
+interface SegmentInsert {
+  chapterId: string;
+  segmentIndex: number;
+  rawText: string;
+  status: "pending";
+  isSceneBreak: number;
 }
 
 export async function insertSegmentRows(planned: PlannedChapter[], chapterIdByIndex: Map<number, string>): Promise<void> {

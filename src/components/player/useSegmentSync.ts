@@ -7,6 +7,7 @@ import { useSSE } from "../../hooks/useSSE";
 import { findNextIndex, hasPendingLines } from "./playbackMath";
 
 const SSE_REFRESH_MIN_MS = 500;
+
 const POLL_INTERVAL_MS = 1200;
 
 export interface SegmentPlaybackRefs {
@@ -15,24 +16,6 @@ export interface SegmentPlaybackRefs {
   isPlaying: MutableRefObject<boolean>;
   awaitingNext: MutableRefObject<boolean>;
   isBufferingNext: MutableRefObject<boolean>;
-}
-
-interface UseSegmentSyncOptions {
-  bookId: string;
-  chapterId: string;
-  refs: SegmentPlaybackRefs;
-  setSegmentsList: (segments: Segment[]) => void;
-  setCurrentIndex: (index: number) => void;
-  setBufferingNext: (buffering: boolean) => void;
-  onChapterComplete: () => void;
-  loadSegmentSource: (segment: Segment, options: { autoplay: boolean }) => void;
-  getLoadedSegmentId: () => string | null;
-}
-
-export interface SegmentSync {
-  isPolling: () => boolean;
-  clearPoll: () => void;
-  startPollingForSegment: (segmentId: string) => void;
 }
 
 export function useSegmentPlaybackRefs(
@@ -61,6 +44,24 @@ export function useSegmentPlaybackRefs(
   }, [isBufferingNext]);
 
   return useMemo(() => ({ segments, currentIndex, isPlaying: isPlayingRef, awaitingNext, isBufferingNext: isBufferingNextRef }), []);
+}
+
+interface UseSegmentSyncOptions {
+  bookId: string;
+  chapterId: string;
+  refs: SegmentPlaybackRefs;
+  setSegmentsList: (segments: Segment[]) => void;
+  setCurrentIndex: (index: number) => void;
+  setBufferingNext: (buffering: boolean) => void;
+  onChapterComplete: () => void;
+  loadSegmentSource: (segment: Segment, options: { autoplay: boolean }) => void;
+  getLoadedSegmentId: () => string | null;
+}
+
+interface SegmentSync {
+  isPolling: () => boolean;
+  clearPoll: () => void;
+  startPollingForSegment: (segmentId: string) => void;
 }
 
 export function useSegmentSync({

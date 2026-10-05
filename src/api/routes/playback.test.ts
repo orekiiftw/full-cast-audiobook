@@ -38,7 +38,7 @@ mock.module("../../db", () => ({
   db: mockDb,
   pool: { connect: async () => ({ release: () => {} }), on: () => {} },
 }));
-mock.module("../ownership", () => ({
+mock.module("../../books/ownership", () => ({
   ownedBook: async () => ({ id: BOOK_ID }),
   ownedChapter: async () => ({ chapter: { id: CHAPTER_ID, bookId: BOOK_ID, chapterIndex: CHAPTER_INDEX } }),
 }));

@@ -5,7 +5,7 @@ import { firstRow } from "../lib/query";
 import { DEFAULT_NARRATOR_VOICE } from "../lib/constants";
 import { detectIndicLanguage } from "../lib/language";
 
-export interface BookVoiceContext {
+interface BookVoiceContext {
   narratorId: string | null;
   narratorVoice: string;
   narratorBaseStyle: string;
@@ -13,15 +13,18 @@ export interface BookVoiceContext {
   language: string | null;
 }
 
+const VOICE_CONTEXT_TTL_MS = 5 * 60_000;
+
+const MAX_CACHED_VOICE_CONTEXTS = 1000;
+
+const LANGUAGE_SAMPLE_SEGMENTS = 30;
+
+const LANGUAGE_SAMPLE_OFFSET_RATIO = 0.25;
+
 interface CachedContext {
   context: BookVoiceContext;
   expiresAt: number;
 }
-
-const VOICE_CONTEXT_TTL_MS = 5 * 60_000;
-const MAX_CACHED_VOICE_CONTEXTS = 1000;
-const LANGUAGE_SAMPLE_SEGMENTS = 30;
-const LANGUAGE_SAMPLE_OFFSET_RATIO = 0.25;
 
 const contextCache = new Map<string, CachedContext>();
 

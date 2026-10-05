@@ -8,11 +8,17 @@ import { ACQUISITION } from "../../lib/constants";
 import { createRateLimiter } from "../rateLimit";
 
 const MAX_QUERY_LENGTH = 500;
+
 const MAX_QUERY_FIELD_LENGTH = 32;
+
 const MAX_RESULTS = 100;
+
 const SEARCH_BODY_LIMIT_BYTES = 32 * 1024;
+
 const SEARCH_WINDOW_MS = 15 * 60 * 1000;
+
 const SEARCH_MAX_REQUESTS = 60;
+
 const BOOK_FORMATS = new Set<string>(["epub", "pdf", "mobi", "azw3", "unknown"]);
 
 export const searchRateLimited = createRateLimiter({ windowMs: SEARCH_WINDOW_MS, maxAttempts: SEARCH_MAX_REQUESTS });

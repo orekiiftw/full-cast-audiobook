@@ -3,7 +3,10 @@ import { MiMoTSProvider } from "./providers/mimo";
 import { SarvamTSProvider } from "./providers/sarvam";
 import type { TTSProvider } from "./types";
 
+export { isRetryableError } from "./errors";
+
 let sharedMimoProvider: MiMoTSProvider | null = null;
+
 const sarvamProviders = new Map<string, SarvamTSProvider>();
 
 export function getTTSProvider(language?: string | null): TTSProvider {
@@ -28,8 +31,3 @@ export function selectProvider(language?: string | null): "mimo" | "sarvam" {
   const normalized = normalizeLanguageCode(language);
   return normalized && INDIC_LANGUAGES.has(normalized) ? "sarvam" : "mimo";
 }
-
-export { MiMoTSProvider } from "./providers/mimo";
-export { SarvamTSProvider } from "./providers/sarvam";
-export { TtsApiError, TtsConfigError, TtsInputError, isRetryableError } from "./errors";
-export type { DeliveryHint, TTSProvider } from "./types";

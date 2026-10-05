@@ -20,7 +20,7 @@ CREATE INDEX IF NOT EXISTS "sessions_user_id_expires_at_idx" ON "sessions" ("use
 --> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "sessions" ADD CONSTRAINT "sessions_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
-EXCEPTION WHEN duplicate_object THEN null;
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN null;
 END $$;
 --> statement-breakpoint
 -- A disabled account preserves pre-authentication data without making it accessible
@@ -39,12 +39,12 @@ ALTER TABLE "books" ALTER COLUMN "user_id" SET NOT NULL;
 --> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "books" ADD CONSTRAINT "books_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
-EXCEPTION WHEN duplicate_object THEN null;
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN null;
 END $$;
 --> statement-breakpoint
 ALTER TABLE "books" DROP CONSTRAINT IF EXISTS "books_source_hash_unique";
 --> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "books" ADD CONSTRAINT "books_user_id_source_hash_unique" UNIQUE ("user_id", "source_hash");
-EXCEPTION WHEN duplicate_object THEN null;
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN null;
 END $$;

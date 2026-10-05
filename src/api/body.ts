@@ -1,7 +1,7 @@
 import { readStreamWithCap } from "../lib/readStream";
 import { ValidationError } from "../lib/validators";
 
-export const DEFAULT_BODY_LIMIT_BYTES = 5 * 1024 * 1024;
+const DEFAULT_BODY_LIMIT_BYTES = 5 * 1024 * 1024;
 
 const BODY_TOO_LARGE = "Request body too large.";
 

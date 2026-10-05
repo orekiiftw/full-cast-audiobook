@@ -1,22 +1,23 @@
 import { fetchWithRedirectGuard, redirectFailureMessage, type RedirectGuard } from "../lib/redirectGuard";
 import { readStreamWithCap } from "../lib/readStream";
+import { isAllowedHost } from "../lib/hosts";
 
 export const MAIN_API_URL = "https://api.torbox.app/v1/api";
+
 export const SEARCH_API_URL = (process.env.TORBOX_SEARCH_URL ?? "https://search-api.torbox.app").replace(/\/+$/, "");
+
 export const SEARCH_API_HOST = new URL(SEARCH_API_URL).hostname;
+
 export const TORBOX_API_HOSTS = ["api.torbox.app"];
 
 export const API_TIMEOUT_MS = 30_000;
+
 export const ERROR_TEXT_CAP = 64 * 1024;
 
 const JSON_RESPONSE_CAP = 32 * 1024 * 1024;
 
 export function torBoxApiKey(): string | undefined {
   return process.env.TORBOX_API_KEY;
-}
-
-export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 export function sanitizeLogText(value: string): string {
@@ -75,7 +76,7 @@ function apiRedirectGuard(allowedHosts: string[]): RedirectGuard {
       if (target.protocol !== "https:") {
         throw new Error(`API redirect to insecure protocol: ${target.protocol}`);
       }
-      if (!allowedHosts.some((host) => target.hostname === host || target.hostname.endsWith(`.${host}`))) {
+      if (!isAllowedHost(target.hostname, allowedHosts)) {
         throw new Error(`API redirect to unapproved host: ${target.hostname}`);
       }
       return target;

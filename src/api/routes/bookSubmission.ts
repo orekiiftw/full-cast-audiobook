@@ -1,52 +1,17 @@
-import { createHash } from "crypto";
 import { ACQUISITION } from "../../lib/constants";
 import { ValidationError, isZipBuffer } from "../../lib/validators";
-import type { BookResult } from "../../acquisition";
+import type { BookSubmission } from "../../books/submission";
 import { readBodyWithLimit, readJsonWithLimit } from "../body";
 
 const MAX_UPLOAD_BYTES = 80 * 1024 * 1024;
+
 const MAX_MULTIPART_BODY_BYTES = MAX_UPLOAD_BYTES + 1024 * 1024;
-const MAX_TITLE_LENGTH = 500;
-const MAX_AUTHOR_LENGTH = 500;
-const MAX_MAGNET_LENGTH = 2048;
-
-interface ProviderBookRef {
-  provider: string;
-  id: string;
-}
-
-export interface BookSubmission {
-  title: string;
-  author: string;
-  magnetOrHash: string;
-  requestedProviderBook?: ProviderBookRef;
-  providerBook?: BookResult;
-  epubBuffer?: Buffer;
-}
 
 export async function readBookSubmission(req: Request): Promise<BookSubmission> {
   if ((req.headers.get("content-type") ?? "").includes("multipart/form-data")) {
     return readMultipartSubmission(req);
   }
   return readJsonSubmission(req);
-}
-
-export function assertSubmissionBounds({ title, author, magnetOrHash }: BookSubmission): void {
-  if (title.length > MAX_TITLE_LENGTH) throw new ValidationError(`title must be ${MAX_TITLE_LENGTH} characters or fewer`);
-  if (author.length > MAX_AUTHOR_LENGTH) throw new ValidationError(`author must be ${MAX_AUTHOR_LENGTH} characters or fewer`);
-  if (magnetOrHash.length > MAX_MAGNET_LENGTH) throw new ValidationError(`magnet must be ${MAX_MAGNET_LENGTH} characters or fewer`);
-}
-
-export function assertSubmissionHasSource({ title, author, epubBuffer, magnetOrHash, providerBook }: BookSubmission): void {
-  if (!epubBuffer && !magnetOrHash && !providerBook && (!title || !author)) {
-    throw new ValidationError("Please upload an EPUB file, supply a magnet/hash link, or provide a Title + Author.");
-  }
-}
-
-export function hashSubmission({ epubBuffer, magnetOrHash, providerBook, title, author }: BookSubmission): string {
-  const hashInput =
-    epubBuffer ?? Buffer.from(magnetOrHash || (providerBook ? `${providerBook.provider}:${providerBook.id}` : `${title}-${author}`));
-  return createHash("sha256").update(hashInput).digest("hex");
 }
 
 async function readMultipartSubmission(req: Request): Promise<BookSubmission> {
@@ -103,6 +68,11 @@ async function readJsonSubmission(req: Request): Promise<BookSubmission> {
   }
 
   return submission;
+}
+
+interface ProviderBookRef {
+  provider: string;
+  id: string;
 }
 
 function readProviderBookRef(requested: Record<string, unknown>): ProviderBookRef {

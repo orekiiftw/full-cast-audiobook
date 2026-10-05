@@ -6,7 +6,7 @@ import { stitchChapter } from "../audio/stitch";
 import { QUEUE } from "../lib/constants";
 import { firstRow } from "../lib/query";
 import { consumeStitchPending, discardStitchPending, emitProgressEvent, enqueueStitch, type StitchJobData } from "../queue";
-import { shouldEnqueueStitch } from "./chapterCounters";
+import { isChapterComplete } from "../lib/chapterStatus";
 import { maybeMarkBookComplete } from "./lifecycle";
 
 const MAX_STITCH_RERUNS = 5;
@@ -45,7 +45,7 @@ async function runStitchOnce(job: Job<StitchJobData>, bookId: string, chapterId:
     return false;
   }
 
-  if (!shouldEnqueueStitch(chapter)) return false;
+  if (!isChapterComplete(chapter)) return false;
 
   if (chapter.voicedCount === 0) {
     await failChapterIfNotFailed(bookId, chapterId, chapterIndex, chapter.status, "All segments failed to generate");

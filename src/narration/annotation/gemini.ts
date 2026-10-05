@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { DEFAULT_TEXT_MODEL } from "../../lib/constants";
 
 const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || DEFAULT_TEXT_MODEL;
+
 const ANNOTATION_TIMEOUT_MS = 120_000;
 
 let sharedClient: { apiKey: string; client: GoogleGenAI } | null = null;

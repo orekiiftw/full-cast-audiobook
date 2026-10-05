@@ -3,8 +3,6 @@ import type { ParsedBook } from "../../epub";
 import { segmentChapter, type SegmentInfo } from "../../narration/segmenter";
 import { EPUB_LIMITS } from "../../lib/constants";
 
-type BookRow = typeof books.$inferSelect;
-
 export interface BookIdentity {
   title: string;
   author: string;
@@ -16,7 +14,10 @@ export interface PlannedChapter {
 }
 
 const PARSED_UNKNOWN_TITLE = "Unknown Title";
+
 const PARSED_UNKNOWN_AUTHOR = "Unknown Author";
+
+type BookRow = typeof books.$inferSelect;
 
 export function resolveBookIdentity(parsedBook: ParsedBook, book: BookRow): BookIdentity {
   return {

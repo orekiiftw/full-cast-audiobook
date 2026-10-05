@@ -1,4 +1,5 @@
 import { TORRENT } from "../lib/constants";
+import { sleep } from "../lib/async";
 import { fetchWithRedirectGuard, redirectFailureMessage, type RedirectGuard } from "../lib/redirectGuard";
 import { readStreamWithCap } from "../lib/readStream";
 import { isZipBuffer } from "../lib/validators";
@@ -26,17 +27,55 @@ interface FileRow {
   size?: number;
 }
 
-interface TorrentRow {
-  progress?: number;
-  status?: string;
-  download_state?: string;
-  download_finished?: boolean;
-  download_present?: boolean;
-  files?: FileRow[];
+const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
+
+const MAX_REDIRECT_HOPS = 5;
+
+export async function readVerifiedBook(response: Response, filename: string): Promise<{ buffer: Buffer; filename: string }> {
+  if (Number(response.headers.get("content-length") ?? 0) > TORRENT.MAX_FILE_SIZE_BYTES)
+    throw new Error("The target book file exceeds the 200MB size limit.");
+  if (!response.body) throw new Error("Empty response body from CDN.");
+  const buffer = await readStreamWithCap(
+    response.body,
+    TORRENT.MAX_FILE_SIZE_BYTES,
+    () => new Error("The downloaded file exceeds the 200MB size limit."),
+  );
+  verifyBookBuffer(buffer, filename);
+  return { buffer, filename };
 }
 
-const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
-const MAX_REDIRECT_HOPS = 5;
+export function selectTorrentFile(files: FileRow[] | undefined, expectedMd5?: string): FileRow | undefined {
+  const list = files ?? [];
+  if (expectedMd5 != null) {
+    const wantedMd5 = expectedMd5.toLowerCase();
+    const md5Match =
+      list.find((file) => fileLabel(file).includes(wantedMd5)) ??
+      list.find((file) =>
+        fileLabel(file)
+          .replace(/[^a-f0-9]/g, "")
+          .includes(wantedMd5),
+      );
+    if (md5Match) return md5Match;
+  }
+  return list.find(isExactEpubFile) ?? list.find((file) => fileLabel(file).includes(".epub"));
+}
+
+export async function attemptTorrentDownload(
+  candidate: TorrentCandidate,
+  cold: boolean,
+  expectedMd5: string | undefined,
+  onProgress?: (message: string) => void,
+): Promise<DownloadAttempt> {
+  return attemptDownload(
+    candidate.magnet || `magnet:?xt=urn:btih:${candidate.hash}`,
+    {
+      pollCap: candidate.cached ? TORRENT.MAX_POLLS : TORRENT.MAX_POLLS_UNCACHED,
+      expectedMd5: candidate.md5 ?? expectedMd5,
+      addOnlyIfCached: cold,
+    },
+    onProgress,
+  );
+}
 
 function cdnRedirectGuard(): RedirectGuard {
   return {
@@ -57,19 +96,6 @@ function verifyBookBuffer(buffer: Buffer, filename: string): void {
   if (!isZipBuffer(buffer)) throw new Error("The file is corrupted or is not a valid EPUB zip archive.");
 }
 
-export async function readVerifiedBook(response: Response, filename: string): Promise<{ buffer: Buffer; filename: string }> {
-  if (Number(response.headers.get("content-length") ?? 0) > TORRENT.MAX_FILE_SIZE_BYTES)
-    throw new Error("The target book file exceeds the 200MB size limit.");
-  if (!response.body) throw new Error("Empty response body from CDN.");
-  const buffer = await readStreamWithCap(
-    response.body,
-    TORRENT.MAX_FILE_SIZE_BYTES,
-    () => new Error("The downloaded file exceeds the 200MB size limit."),
-  );
-  verifyBookBuffer(buffer, filename);
-  return { buffer, filename };
-}
-
 function fileLabel(file: FileRow): string {
   return `${file.short_name || ""} ${file.name || ""}`.toLowerCase();
 }
@@ -79,20 +105,13 @@ function isExactEpubFile(file: FileRow): boolean {
   return label.includes(".epub") && !label.includes(".epub.") && !/sample/i.test(label);
 }
 
-export function selectTorrentFile(files: FileRow[] | undefined, expectedMd5?: string): FileRow | undefined {
-  const list = files ?? [];
-  if (expectedMd5 != null) {
-    const wantedMd5 = expectedMd5.toLowerCase();
-    const md5Match =
-      list.find((file) => fileLabel(file).includes(wantedMd5)) ??
-      list.find((file) =>
-        fileLabel(file)
-          .replace(/[^a-f0-9]/g, "")
-          .includes(wantedMd5),
-      );
-    if (md5Match) return md5Match;
-  }
-  return list.find(isExactEpubFile) ?? list.find((file) => fileLabel(file).includes(".epub"));
+interface TorrentRow {
+  progress?: number;
+  status?: string;
+  download_state?: string;
+  download_finished?: boolean;
+  download_present?: boolean;
+  files?: FileRow[];
 }
 
 function isDownloadReady(torrent: TorrentRow): boolean {
@@ -150,7 +169,7 @@ async function waitForTorrentReady(
     } catch (error) {
       console.warn("⚠️ TorBox mylist poll failed:", error);
     }
-    await new Promise((resolve) => setTimeout(resolve, TORRENT.POLL_INTERVAL_MS));
+    await sleep(TORRENT.POLL_INTERVAL_MS);
   }
   return torrent;
 }
@@ -209,21 +228,4 @@ async function attemptDownload(
   const downloadUrl = await requestDownloadLink(torrentId, target.id, apiKey);
   const book = await downloadTorrentFile(downloadUrl, filename);
   return { ok: true, buffer: book.buffer, filename: book.filename };
-}
-
-export async function attemptTorrentDownload(
-  candidate: TorrentCandidate,
-  cold: boolean,
-  expectedMd5: string | undefined,
-  onProgress?: (message: string) => void,
-): Promise<DownloadAttempt> {
-  return attemptDownload(
-    candidate.magnet || `magnet:?xt=urn:btih:${candidate.hash}`,
-    {
-      pollCap: candidate.cached ? TORRENT.MAX_POLLS : TORRENT.MAX_POLLS_UNCACHED,
-      expectedMd5: candidate.md5 ?? expectedMd5,
-      addOnlyIfCached: cold,
-    },
-    onProgress,
-  );
 }

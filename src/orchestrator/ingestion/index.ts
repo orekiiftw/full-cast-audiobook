@@ -22,12 +22,6 @@ import {
 import { reportIngestionFailure } from "./failure";
 
 type BookSource = IngestionJobData["source"];
-type BookRow = typeof books.$inferSelect;
-
-interface PreparedBook {
-  parsedBook: ParsedBook;
-  storedEpub: StoredEpub;
-}
 
 export async function queueBookIngestion(bookId: string, source: BookSource): Promise<void> {
   await enqueueIngestion(bookId, source);
@@ -66,6 +60,13 @@ export async function runIngestionJob(job: Job<IngestionJobData>): Promise<void>
   } catch (error: unknown) {
     await reportIngestionFailure(bookId, error, storedEpub);
   }
+}
+
+type BookRow = typeof books.$inferSelect;
+
+interface PreparedBook {
+  parsedBook: ParsedBook;
+  storedEpub: StoredEpub;
 }
 
 async function prepareBook(book: BookRow, source: BookSource): Promise<PreparedBook> {

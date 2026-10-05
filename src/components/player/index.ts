@@ -6,6 +6,5 @@ export { useLineRegeneration } from "./useLineRegeneration";
 export { usePlaybackPosition } from "./usePlaybackPosition";
 export { useSegmentPlayback } from "./useSegmentPlayback";
 export { chapterDurationMs, isTextEntryTarget, playbackProgressPercent, voicedSharePercent } from "./playbackMath";
-export type { AudioPlayerOptions } from "./useAudioPlayer";
 export type { SegmentPlayback } from "./useSegmentPlayback";
 export type { PlayerTransportControls } from "./TransportControls";

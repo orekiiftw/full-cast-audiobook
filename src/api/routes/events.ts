@@ -2,9 +2,10 @@ import { pipelineEvents } from "../../queue";
 import { corsHeaders, json } from "../response";
 import { type RouteContext, type RouteTable } from "../route";
 import { requireUuid } from "../../lib/validators";
-import { ownedBook } from "../ownership";
+import { ownedBook } from "../../books/ownership";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
+
 const MAX_SSE_PER_USER = 8;
 
 const activeStreamsByUser = new Map<string, number>();

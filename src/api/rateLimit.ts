@@ -1,8 +1,8 @@
 const SWEEP_INTERVAL_MS = 60_000;
 
-export type RateLimiter = (key: string) => boolean;
+type RateLimiter = (key: string) => boolean;
 
-export interface RateLimitPolicy {
+interface RateLimitPolicy {
   windowMs: number;
   maxAttempts: number;
 }

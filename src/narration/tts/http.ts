@@ -1,14 +1,9 @@
 import { TTS } from "../../lib/constants";
 import { TtsApiError, isRetryableError } from "./errors";
-import { extendRateLimitCoolDown, sleep, waitForRateLimitGate } from "./rateLimit";
+import { extendRateLimitCoolDown, waitForRateLimitGate } from "./rateLimit";
+import { sleep } from "../../lib/async";
 
 const REQUEST_TIMEOUT_MS = TTS.REQUEST_TIMEOUT_MS;
-
-interface SynthesisPlan {
-  failurePrefix: string;
-  describeAttempt: (attempt: number, maxAttempts: number) => string;
-  send: () => Promise<Buffer>;
-}
 
 export async function postSpeechRequest(
   url: string,
@@ -38,6 +33,12 @@ export function parseRetryAfterMs(header: string | null): number | null {
   const dateMs = Date.parse(header);
   if (!Number.isNaN(dateMs)) return Math.max(dateMs - Date.now(), 250);
   return null;
+}
+
+interface SynthesisPlan {
+  failurePrefix: string;
+  describeAttempt: (attempt: number, maxAttempts: number) => string;
+  send: () => Promise<Buffer>;
 }
 
 export async function synthesizeWithRetries(plan: SynthesisPlan): Promise<Buffer> {

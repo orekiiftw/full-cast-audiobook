@@ -1,10 +1,16 @@
 import { NEUTRAL_BEAT_DELIVERY, createNeutralBeat, type AnnotationResult, type BeatAnnotation } from "./beats";
+import { errorMessage } from "../../lib/errors";
 
 const MAX_BEATS = 12;
+
 const MAX_BEAT_TEXT_CHARS = 4000;
+
 const MAX_DELIVERY_FIELD_CHARS = 500;
+
 const MAX_SCENE_SUMMARY_CHARS = 2000;
+
 const VALID_PACE = new Set(["slow", "normal", "fast"]);
+
 const LEGACY_SCENE_SUMMARY = "A scene in the book.";
 
 export function extractBeats(annotatedJson: unknown): BeatAnnotation[] {
@@ -23,7 +29,7 @@ export function parseAnnotationResponse(raw: string, fallbackText: string, fallb
     return normalizeAnnotation(JSON.parse(raw) as unknown, fallbackText, fallbackSummary);
   } catch (error) {
     console.error("Annotation parse failed. Raw response length:", raw.length);
-    const detail = error instanceof Error ? error.message : String(error);
+    const detail = errorMessage(error);
     throw new Error(`Failed to parse annotation JSON response: ${detail}`);
   }
 }

@@ -2,18 +2,18 @@ import { useState } from "react";
 import { apiFetch, deleteBook, reportNetworkError } from "../../lib/api";
 import { useToast } from "../ui";
 
-interface UseBookMaintenanceOptions {
-  bookId: string;
-  onBack: () => void;
-  reload: () => Promise<void>;
-  clearProgressLog: () => void;
-}
-
 export interface BookMaintenanceModel {
   retrying: boolean;
   retry: () => Promise<void>;
   deleting: boolean;
   remove: (title: string) => Promise<void>;
+}
+
+interface UseBookMaintenanceOptions {
+  bookId: string;
+  onBack: () => void;
+  reload: () => Promise<void>;
+  clearProgressLog: () => void;
 }
 
 export function useBookMaintenance({ bookId, onBack, reload, clearProgressLog }: UseBookMaintenanceOptions): BookMaintenanceModel {

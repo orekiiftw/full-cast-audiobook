@@ -7,8 +7,11 @@ export interface BookBlock {
 }
 
 const BARE_BOOK_TITLE_MAX_LENGTH = 60;
+
 const DETECTED_HEADING_MAX_LENGTH = 120;
+
 const BARE_PAGE_NUMBER_RE = /^\d{1,4}$/;
+
 const DECORATED_PAGE_NUMBER_RE = /^[.…·•\-\s]*\d{1,4}\s*$/;
 
 export function readPageBody(htmlContent: string): HTMLElement | null {

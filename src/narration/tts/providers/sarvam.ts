@@ -14,7 +14,9 @@ import { runWithTtsSlot } from "../rateLimit";
 import type { DeliveryHint, TTSProvider } from "../types";
 
 const PROVIDER_LABEL = "Sarvam TTS";
+
 const MAX_ERROR_BODY_CHARS = 500;
+
 const SARVAM_PACE_BY_HINT = new Map([
   ["slow", 0.8],
   ["fast", 1.2],

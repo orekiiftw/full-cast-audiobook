@@ -1,7 +1,7 @@
 import { ISO_639_2_TO_1 } from "./languageCodes";
 import { BookResult, SearchQuery } from "./types";
 
-export interface RankingConfig {
+interface RankingConfig {
   preferredLanguages: string[];
   preferredFormats: string[];
   weights: {
@@ -15,7 +15,7 @@ export interface RankingConfig {
   };
 }
 
-export const defaultRankingConfig: RankingConfig = {
+const defaultRankingConfig: RankingConfig = {
   preferredLanguages: (process.env.PREFERRED_LANGUAGES ?? "en")
     .split(",")
     .map((value) => value.trim().toLowerCase())

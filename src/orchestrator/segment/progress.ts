@@ -4,7 +4,7 @@ import { chapters, segments } from "../../schema";
 import { PIPELINE } from "../../lib/constants";
 import { firstRow } from "../../lib/query";
 import { emitProgressEvent } from "../../queue";
-import type { ChapterCounters } from "../chapterCounters";
+import { isChapterComplete, type ChapterCounters } from "../../lib/chapterStatus";
 
 type ChapterRow = typeof chapters.$inferSelect;
 
@@ -44,7 +44,7 @@ async function isPlayableWindowReady(chapterId: string, counters: ChapterCounter
   const threshold = PIPELINE.PARTIAL_READY_THRESHOLD;
 
   if (counters.totalCount <= threshold) {
-    return counters.totalCount > 0 && counters.voicedCount + counters.failedCount >= counters.totalCount && counters.voicedCount > 0;
+    return isChapterComplete(counters) && counters.voicedCount > 0;
   }
 
   const leadingIndexes = Array.from({ length: threshold }, (_, index) => index + 1);

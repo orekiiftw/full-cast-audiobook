@@ -2,7 +2,7 @@ import { resolveRange, statFile, streamFile, type StreamRange, type StreamResult
 import { isSafeStorageKey } from "../../storage/keys";
 import { corsHeaders, json } from "../response";
 import { type RouteContext, type RouteTable } from "../route";
-import { ownsStorageKey } from "../ownership";
+import { ownsStorageKey } from "../../books/ownership";
 
 const CONTENT_TYPES: Record<string, string> = {
   wav: "audio/wav",

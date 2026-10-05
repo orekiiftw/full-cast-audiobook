@@ -4,6 +4,7 @@ import { invalidateBookVoiceContext } from "../narration/voiceContext";
 import { redis, redisSub } from "./connection";
 
 export const pipelineEvents = new EventEmitter();
+
 pipelineEvents.setMaxListeners(500);
 
 export function emitProgressEvent(bookId: string, eventType: string, payload: Record<string, unknown>): void {

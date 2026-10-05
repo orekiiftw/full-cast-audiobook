@@ -4,6 +4,7 @@ import type { AudioTransport } from "./useAudioTransport";
 import type { SegmentPlaybackRefs } from "./useSegmentSync";
 
 const READY_RETRY_INTERVAL_MS = 800;
+
 const READY_RETRY_LIMIT = 5;
 
 interface UsePlaybackFollowOptions {

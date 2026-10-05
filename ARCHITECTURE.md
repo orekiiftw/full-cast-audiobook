@@ -21,6 +21,30 @@ ready|failed`), `chapters` (`queued → processing → partial_ready → ready|f
 `segments` (`pending → queued → processing → annotated → voiced|failed`). Postgres is the system
 of record; Redis owns scheduling, retries, and cross-instance work.
 
+## Source layout
+
+Directory entry files (`index.ts`) expose the operations and types callers need. Provider
+registration lives in `acquisition/manifest.ts`, and torrent book-download orchestration lives in
+`torrent/books.ts`, rather than mixing implementation with re-exports.
+
+Within a file, imports and re-exports come first, followed by shared types and configuration,
+public operations, then private helpers. Implementation-only types sit beside their first use.
+Runtime initialization keeps its dependency order; declaration order is not an excuse to change
+when environment variables are captured or singletons are created. Tests stay beside the seam
+they exercise.
+
+`api/routes` owns HTTP parsing, request validation, authorization checks, and response mapping.
+`books` owns ownership queries, book submission and persistence, detail assembly, chapter reads,
+and playback persistence plus lookahead scheduling. `auth` owns accounts and sessions.
+`narration` owns pronunciation writes and voice-preview generation, while `orchestrator/regeneration`
+owns regeneration locking, synthesis, counter repair, and re-stitch scheduling. These operations
+return domain data, not HTTP responses.
+
+Cross-module primitives belong in `lib`: error messages, delays, host matching, stream conversion,
+audio URLs, environment parsing, and chapter-completion checks. Storage-key construction remains
+in `storage/keys.ts`. Transport-specific limits and error messages stay at their call sites;
+sharing a primitive must not unify policies that intentionally differ.
+
 ## Pipeline and queue
 
 **Job contracts.** Segment jobs: 5 attempts, exponential backoff from 5 s, `removeOnComplete`,
