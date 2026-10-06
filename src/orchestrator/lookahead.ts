@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, gte, inArray, or } from "drizzle-orm";
+import { and, asc, eq, gt, gte, inArray, lte, or } from "drizzle-orm";
 import { db } from "../db";
 import { chapters, segments } from "../schema";
 import { EPUB_LIMITS, PIPELINE } from "../lib/constants";
@@ -36,7 +36,7 @@ export async function ensureLookahead(
 }
 
 export async function ensureChapterLookahead(bookId: string, chapterIndex: number, opts: { force?: boolean } = {}): Promise<void> {
-  if (!lookaheadThrottle.shouldEvaluate(`chapter:${bookId}:${chapterIndex}`, opts)) return;
+  const includeBuffer = lookaheadThrottle.shouldEvaluate(`chapter:${bookId}:${chapterIndex}`, opts);
 
   const windowRows = await db
     .select({
@@ -48,9 +48,7 @@ export async function ensureChapterLookahead(bookId: string, chapterIndex: numbe
     })
     .from(segments)
     .innerJoin(chapters, eq(segments.chapterId, chapters.id))
-    .where(
-      and(eq(chapters.bookId, bookId), inArray(chapters.chapterIndex, [chapterIndex, chapterIndex + 1]), eq(segments.status, "pending")),
-    )
+    .where(and(chapterWindow(bookId, chapterIndex, includeBuffer ? PIPELINE.CHAPTER_LOOKAHEAD : 0), eq(segments.status, "pending")))
     .orderBy(asc(chapters.chapterIndex), asc(segments.segmentIndex));
 
   await promotePendingSegments(windowRows, bookId);
@@ -96,6 +94,10 @@ interface LookaheadWindowRow {
   status: string;
 }
 
+function chapterWindow(bookId: string, chapterIndex: number, lookahead = PIPELINE.CHAPTER_LOOKAHEAD) {
+  return and(eq(chapters.bookId, bookId), gte(chapters.chapterIndex, chapterIndex), lte(chapters.chapterIndex, chapterIndex + lookahead));
+}
+
 function loadLookaheadWindow(bookId: string, anchor: LookaheadAnchor): Promise<LookaheadWindowRow[]> {
   return db
     .select({
@@ -109,7 +111,7 @@ function loadLookaheadWindow(bookId: string, anchor: LookaheadAnchor): Promise<L
     .innerJoin(chapters, eq(segments.chapterId, chapters.id))
     .where(
       and(
-        eq(chapters.bookId, bookId),
+        chapterWindow(bookId, anchor.chapterIndex),
         inArray(segments.status, ["pending", "queued", "processing", "annotated"]),
         or(
           gt(chapters.chapterIndex, anchor.chapterIndex),

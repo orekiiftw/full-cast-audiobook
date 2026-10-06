@@ -27,7 +27,10 @@ export async function runSegmentJob(job: Job<SegmentJobData>): Promise<void> {
     const chapterRow = await firstRow(db.select().from(chapters).where(eq(chapters.id, chapterId)));
     if (!chapterRow || chapterRow.bookId !== bookId) {
       console.warn(`⚠️ Segment job ${segmentId}: job data does not match DB lineage (book ${bookId}/chapter ${chapterId}). Skipping.`);
-      await db.update(segments).set({ status: "queued" }).where(eq(segments.id, segmentId));
+      await db
+        .update(segments)
+        .set({ status: "queued" })
+        .where(and(eq(segments.id, segmentId), eq(segments.status, "processing")));
       return;
     }
 
