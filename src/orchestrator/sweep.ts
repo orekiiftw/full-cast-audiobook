@@ -122,7 +122,13 @@ async function failOrphanedSegment(row: MidflightSegment, jobState: string, atte
 }
 
 async function requeueOrphanedSegment(row: MidflightSegment, jobState: string, attempts: number): Promise<void> {
-  await db.update(segments).set({ status: "queued", attempts }).where(eq(segments.id, row.segmentId));
+  const requeued = await db
+    .update(segments)
+    .set({ status: "queued", attempts })
+    .where(and(eq(segments.id, row.segmentId), inArray(segments.status, ["processing", "annotated"])))
+    .returning({ id: segments.id });
+  if (requeued.length === 0) return;
+
   await enqueueSegmentJobs([row]);
   console.warn(`🧹 Sweep requeued orphaned segment ${row.segmentId} (job state: ${jobState}).`);
 }

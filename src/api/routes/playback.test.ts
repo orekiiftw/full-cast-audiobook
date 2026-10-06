@@ -22,6 +22,7 @@ mock.module("ioredis", () => ({ Redis: FakeRedis, default: FakeRedis }));
 
 const BOOK_ID = "00000000-0000-0000-0000-000000000040";
 const CHAPTER_ID = "00000000-0000-0000-0000-000000000041";
+const NEXT_CHAPTER_ID = "00000000-0000-0000-0000-000000000043";
 const CHAPTER_INDEX = 7;
 
 let upserts = 0;
@@ -40,7 +41,9 @@ mock.module("../../db", () => ({
 }));
 mock.module("../../books/ownership", () => ({
   ownedBook: async () => ({ id: BOOK_ID }),
-  ownedChapter: async () => ({ chapter: { id: CHAPTER_ID, bookId: BOOK_ID, chapterIndex: CHAPTER_INDEX } }),
+  ownedChapter: async (_userId: string, chapterId: string) => ({
+    chapter: { id: chapterId, bookId: BOOK_ID, chapterIndex: chapterId === NEXT_CHAPTER_ID ? CHAPTER_INDEX + 1 : CHAPTER_INDEX },
+  }),
 }));
 
 const chapterLookaheadCalls: Array<[string, number]> = [];
@@ -89,7 +92,7 @@ describe("playback sync voicing-window re-centering", () => {
     expect(anchorLookaheadCalls).toEqual([[BOOK_ID, { chapterIndex: CHAPTER_INDEX, segmentIndex: 42 }]]);
   });
 
-  it("still voices the whole chapter plus the next on every sync", async () => {
+  it("requests the full current chapter and chapter buffer on every sync", async () => {
     await runSync({ segmentIndex: 42 });
     expect(chapterLookaheadCalls).toEqual([[BOOK_ID, CHAPTER_INDEX]]);
   });
@@ -98,6 +101,13 @@ describe("playback sync voicing-window re-centering", () => {
     await runSync({});
     expect(anchorLookaheadCalls).toHaveLength(0);
     expect(chapterLookaheadCalls).toEqual([[BOOK_ID, CHAPTER_INDEX]]);
+  });
+
+  it("slides the chapter buffer when playback advances to the next chapter", async () => {
+    await runSync({ chapterId: NEXT_CHAPTER_ID, segmentIndex: 1, positionMs: 0 });
+    expect(chapterLookaheadCalls).toEqual([[BOOK_ID, CHAPTER_INDEX + 1]]);
+    expect(anchorLookaheadCalls).toEqual([[BOOK_ID, { chapterIndex: CHAPTER_INDEX + 1, segmentIndex: 1 }]]);
+    expect(upserts).toBe(1);
   });
 
   it("rejects a non-positive segmentIndex before touching playback state", async () => {

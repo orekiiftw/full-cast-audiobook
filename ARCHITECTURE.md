@@ -57,14 +57,18 @@ never automatic. The maintenance queue repeats every 5 minutes. Concurrency is 2
 stitch job by chapter id. BullMQ silently ignores an `add` whose job id exists in any state, so
 every submit calls `clearTerminalJob` first; without it, work is dropped without a trace.
 
-**Lookahead is the TTS budget.** Only the next `LOOKAHEAD_SEGMENTS` (4) unfinished segments at or
-after the listener's position get voiced eagerly; everything else stays `pending` until playback
-approaches it. `ensureLookahead` re-centers on every playback sync (throttled per book+chapter for
-2 s, map capped at 5000 keys), lifting queued jobs to `LOOKAHEAD_PRIORITY` and promoting pending
-rows. `ensureChapterLookahead` covers chapters N and N+1 with its own 10 s window and is what fills
-in the rest of a chapter when the player opens it; `prefetchNextChapter` lifts the next chapter's
-jobs into the current chapter's priority band (64 per `changePriority` batch) and refuses to run
-while the current chapter still has queued, processing, or annotated segments.
+**Lookahead is the TTS budget.** Ingestion primes only the opening `LOOKAHEAD_SEGMENTS` (4)
+unfinished segments. Once the listener opens or syncs chapter N, `ensureChapterLookahead`
+promotes every pending segment in N through N+`CHAPTER_LOOKAHEAD` (4 chapters ahead by default,
+inclusive). Only listener progress moves this window; finishing audio never advances it.
+`ensureLookahead` re-centers on playback sync, lifting queued jobs to `LOOKAHEAD_PRIORITY` and
+promoting up to `LOOKAHEAD_SEGMENTS` rows, but cannot scan past the same chapter ceiling. Both
+lookahead paths throttle per book+chapter for 2 s (maps capped at 5000 keys); current-chapter
+promotion bypasses the throttle so it cannot stall. `prefetchNextChapter` only lifts already-queued
+jobs into the current chapter's priority band (64 per `changePriority` batch), throttles for 10 s,
+and refuses to run while the current chapter has queued, processing, or annotated segments.
+Sweep and recovery can retry already-queued or mid-flight work, never promote pending rows.
+Explicit segment regeneration is the only user-requested exception to the chapter cap.
 
 **Partial readiness.** A chapter becomes `partial_ready` once its first `PARTIAL_READY_THRESHOLD`
 (1) segments are terminal with at least one voiced, so playback can start while voicing continues.
