@@ -18,24 +18,11 @@ const SegmentRow = memo(function SegmentRow({ seg, index, isActive, onSelect, on
     <div
       ref={(el) => registerRef(seg.id, el)}
       onClick={() => playable && onSelect(index)}
-      className={`group relative rounded-xl p-4 transition-all duration-300 ${playable ? "cursor-pointer" : ""} ${
+      className={`group relative flow-root rounded-xl p-4 transition-all duration-300 ${playable ? "cursor-pointer" : ""} ${
         isActive ? "bg-gold-500/[0.07] border border-gold-500/20 shadow-glow-soft" : "border border-transparent hover:bg-white/[0.02]"
       }`}
     >
-      <p
-        className={`font-serif text-[15px] sm:text-base leading-[1.75] transition-colors ${
-          isActive ? "text-cinema-100" : "text-cinema-400"
-        } ${seg.status === "failed" ? "opacity-40 line-through" : ""}`}
-      >
-        {seg.rawText}
-      </p>
-      {isPendingStatus(seg.status) && (
-        <span className="mt-2.5 inline-block text-[10px] uppercase tracking-[0.14em] text-gold-400/80 font-medium">
-          {seg.status === "processing" ? "Performing…" : "Queued"}
-        </span>
-      )}
-
-      <div className="absolute right-3 top-3 opacity-0 group-hover:opacity-100 max-sm:opacity-100 transition-opacity">
+      <div className="float-right ml-3 mb-1.5 opacity-0 group-hover:opacity-100 max-sm:opacity-100 transition-opacity">
         {playable && (
           <button
             onClick={(e) => {
@@ -49,6 +36,18 @@ const SegmentRow = memo(function SegmentRow({ seg, index, isActive, onSelect, on
           </button>
         )}
       </div>
+      <p
+        className={`font-serif text-[15px] sm:text-base leading-[1.75] transition-colors ${
+          isActive ? "text-cinema-100" : "text-cinema-400"
+        } ${seg.status === "failed" ? "opacity-40 line-through" : ""}`}
+      >
+        {seg.rawText}
+      </p>
+      {isPendingStatus(seg.status) && (
+        <span className="mt-2.5 inline-block text-[10px] uppercase tracking-[0.14em] text-gold-400/80 font-medium">
+          {seg.status === "processing" ? "Performing…" : "Queued"}
+        </span>
+      )}
     </div>
   );
 });
