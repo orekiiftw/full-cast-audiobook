@@ -49,6 +49,7 @@ export function usePlaybackSession(showToast: ShowToast): PlaybackSession {
 
   useEffect(() => {
     const segment = activeSegmentsList[activeSegmentIndex];
+    if (segment) segmentIndexRef.current = segment.segmentIndex;
     latestRef.current = {
       book: activeBook,
       chapter: activeChapter,
@@ -91,6 +92,9 @@ export function usePlaybackSession(showToast: ShowToast): PlaybackSession {
       syncPosition();
       progressTargetRef.current = { bookId: book.id, chapterId: chapter.id };
       positionRef.current = resumeMs;
+      // A chapter switch runs the sync interval's cleanup, already targeting this chapter, before the
+      // effect above updates the ref; a stale line index there would anchor voicing at the wrong line.
+      segmentIndexRef.current = segments[startIndex].segmentIndex;
 
       setActiveBook(book);
       setActiveChapter(chapter);

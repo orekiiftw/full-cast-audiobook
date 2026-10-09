@@ -9,7 +9,7 @@ Narratea is a production-ready system running on the Bun runtime that transforms
 - **Pronunciation Subscriptions**: User-defined phonetic substitutions for fantasy terms or complex names are injected directly into synthesis inputs.
 - **Fast Time-to-First-Audio**: Each chapter opens with a small lead-in segment (~70 words) that is voiced in seconds, so playback can start almost immediately.
 - **Progressive Playback**: Chapters unlock as soon as their first segment is ready. Playback continues progressively in the web player while subsequent sections generate in the background.
-- **Playback Prefetching**: Automatically prioritizes performance synthesis for chapter N+1 when playback for chapter N begins.
+- **Just-in-Time Voicing**: Only the segment being listened to and the next `LOOKAHEAD_SEGMENTS` (4) are synthesized ahead of the listener, across chapter boundaries, so TTS spend follows playback instead of the whole book.
 - **Dynamic Segment Redo**: Adjust emotional beats or pronunciation for any paragraph on the fly directly from the reading interface.
 - **Cinema-Inspired Interface**: Sleek dark premium theme with gold highlights, smooth easing transitions, and detailed performance event consoles.
 

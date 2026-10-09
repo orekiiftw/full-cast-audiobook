@@ -1,5 +1,5 @@
 import type { Job } from "bullmq";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { segments } from "../../schema";
 import { PIPELINE } from "../../lib/constants";
@@ -67,9 +67,12 @@ async function failSegmentPermanently(
 }
 
 async function requeueSegmentForRetry(segmentId: string, attempts: number): Promise<void> {
-  await db
+  const requeued = await db
     .update(segments)
     .set({ attempts, status: "queued" })
-    .where(and(eq(segments.id, segmentId), sql`${segments.status} != 'voiced'`));
+    .where(and(eq(segments.id, segmentId), inArray(segments.status, ["queued", "processing", "annotated"])))
+    .returning({ id: segments.id });
+  if (requeued.length === 0) return;
+
   console.log(`⏳ Segment ${segmentId} requeued by BullMQ backoff (attempt ${attempts}/${PIPELINE.MAX_SEGMENT_ATTEMPTS})`);
 }

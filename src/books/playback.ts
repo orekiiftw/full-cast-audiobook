@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { playbackState } from "../schema";
-import { ensureChapterLookahead, ensureLookahead } from "../orchestrator";
+import { ensureLookahead } from "../orchestrator";
 
 export interface PlaybackPosition {
   bookId: string;
@@ -11,10 +11,6 @@ export interface PlaybackPosition {
 
 export async function syncPlaybackPosition(position: PlaybackPosition, chapterIndex: number): Promise<void> {
   await storePlaybackPosition(position);
-
-  ensureChapterLookahead(position.bookId, chapterIndex).catch((err) =>
-    console.error(`Lookahead ensure failed for book ${position.bookId} ch ${chapterIndex}:`, err),
-  );
 
   if (position.segmentIndex !== undefined) {
     ensureLookahead(position.bookId, { chapterIndex, segmentIndex: position.segmentIndex }).catch((err) =>

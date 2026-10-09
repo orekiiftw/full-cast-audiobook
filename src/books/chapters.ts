@@ -1,18 +1,17 @@
 import { asc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { chapters, segments } from "../schema";
-import { ensureChapterLookahead, prefetchNextChapter } from "../orchestrator";
+import { ensureLookahead } from "../orchestrator";
 import { versionedAudioUrl } from "../lib/audioUrl";
 
-export async function listChapterSegments(chapter: typeof chapters.$inferSelect, chapterId: string) {
+export async function listChapterSegments(chapter: typeof chapters.$inferSelect, chapterId: string, anchorSegmentIndex?: number) {
   const list = await listSegments(chapterId);
 
-  prefetchNextChapter(chapter.bookId, chapter.chapterIndex).catch((err) =>
-    console.error(`Lookahead prefetch failed for book ${chapter.bookId} ch ${chapter.chapterIndex}:`, err),
-  );
-  ensureChapterLookahead(chapter.bookId, chapter.chapterIndex).catch((err) =>
-    console.error(`Lookahead ensure failed for book ${chapter.bookId} ch ${chapter.chapterIndex}:`, err),
-  );
+  if (anchorSegmentIndex !== undefined) {
+    ensureLookahead(chapter.bookId, { chapterIndex: chapter.chapterIndex, segmentIndex: anchorSegmentIndex }).catch((err) =>
+      console.error(`Lookahead re-center failed for book ${chapter.bookId} ch ${chapter.chapterIndex} seg ${anchorSegmentIndex}:`, err),
+    );
+  }
 
   return { chapter, segments: list.map((segment) => toSegmentSummary(segment, chapterId)) };
 }

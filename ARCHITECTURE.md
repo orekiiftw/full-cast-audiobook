@@ -57,14 +57,20 @@ never automatic. The maintenance queue repeats every 5 minutes. Concurrency is 2
 stitch job by chapter id. BullMQ silently ignores an `add` whose job id exists in any state, so
 every submit calls `clearTerminalJob` first; without it, work is dropped without a trace.
 
-**Lookahead is the TTS budget.** Only the next `LOOKAHEAD_SEGMENTS` (4) unfinished segments at or
-after the listener's position get voiced eagerly; everything else stays `pending` until playback
-approaches it. `ensureLookahead` re-centers on every playback sync (throttled per book+chapter for
-2 s, map capped at 5000 keys), lifting queued jobs to `LOOKAHEAD_PRIORITY` and promoting pending
-rows. `ensureChapterLookahead` covers chapters N and N+1 with its own 10 s window and is what fills
-in the rest of a chapter when the player opens it; `prefetchNextChapter` lifts the next chapter's
-jobs into the current chapter's priority band (64 per `changePriority` batch) and refuses to run
-while the current chapter still has queued, processing, or annotated segments.
+**Lookahead is the TTS budget.** Only a window of segments gets voiced eagerly: the listener's
+segment plus the next `LOOKAHEAD_SEGMENTS` (4) in book order, crossing chapter ends and skipping
+chapters without segments. Everything else stays `pending` until the listener gets close. The
+window is positional: voiced and failed segments keep their slots, so finished audio never moves
+it, only a new anchor does. `ensureLookahead` is the only way out of `pending`. It lifts queued jobs
+inside the window to `LOOKAHEAD_PRIORITY` (64 per `changePriority` batch), atomically promotes the
+window's pending rows to `queued` and enqueues them at that priority, and returns them to `pending`
+if the enqueue fails. Ingestion primes the window at the start of the book; a playback sync carrying
+`segmentIndex` and a buffering poll carrying `?at=` re-center it. Calls are throttled for 2 s per
+book, chapter, and segment (map capped at 5000 keys), so a moved anchor is never delayed, and a
+failed call releases its key so the same anchor can retry at once. Retries, the sweep, boot
+recovery, and lineage resets only touch rows that are already queued or mid-flight. The one
+exception is a user-requested regeneration: it claims its row from any status except `processing`,
+and if that run dies, the sweep requeues the row like any orphan.
 
 **Partial readiness.** A chapter becomes `partial_ready` once its first `PARTIAL_READY_THRESHOLD`
 (1) segments are terminal with at least one voiced, so playback can start while voicing continues.
@@ -385,7 +391,10 @@ consumed by the next load; a playable trailing segment with no known duration re
 jumping inside a non-existent timeline.
 
 **Buffering** polls `/api/chapters/:id/segments` every 1200 ms while the next line is missing, with
-SSE `segment_ready` patching the list in place (throttled to one refresh per 500 ms). A safety net
+SSE `segment_ready` patching the list in place (throttled to one refresh per 500 ms). While stalled,
+each poll sends `?at=` with the current line's `segmentIndex`, re-centering the voicing window on
+the listener; at a chapter's last line, that window opens the start of the next chapter. Other
+segment reads never send `at`, so they never move the window. A safety net
 retries `play()` every 800 ms up to five consecutive failures before dropping the playing flag.
 
 **Sleep timer lives in `App`**, not the player: the player receives preset and remaining seconds as

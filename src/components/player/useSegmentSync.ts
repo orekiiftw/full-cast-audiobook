@@ -89,7 +89,9 @@ export function useSegmentSync({
 
   const refreshSegments = useCallback(async () => {
     try {
-      const response = await apiFetch(`/api/chapters/${chapterId}/segments`);
+      const waitedSegmentIndex = findWaitedSegmentIndex(refs);
+      const anchorQuery = waitedSegmentIndex === null ? "" : `?at=${waitedSegmentIndex}`;
+      const response = await apiFetch(`/api/chapters/${chapterId}/segments${anchorQuery}`);
       if (!response.ok) return null;
       const data = (await response.json()) as { segments?: Segment[] };
       const freshSegments = data.segments ?? [];
@@ -99,7 +101,7 @@ export function useSegmentSync({
       console.error("Error refreshing segments:", err);
       return null;
     }
-  }, [chapterId, setSegmentsList]);
+  }, [chapterId, refs, setSegmentsList]);
 
   const advanceFromFreshSegments = useCallback(
     (freshSegments: Segment[]) => {
@@ -216,4 +218,11 @@ export function useSegmentSync({
   const isPolling = useCallback(() => pollIntervalRef.current !== null, []);
 
   return useMemo(() => ({ isPolling, clearPoll, startPollingForSegment }), [clearPoll, isPolling, startPollingForSegment]);
+}
+
+// `at` moves the server's voicing window, so it is sent only while the player is stalled. When no
+// line follows in this chapter, anchoring on the current one opens the start of the next chapter.
+function findWaitedSegmentIndex(refs: SegmentPlaybackRefs): number | null {
+  if (!refs.isBufferingNext.current && !refs.awaitingNext.current) return null;
+  return refs.segments.current[refs.currentIndex.current]?.segmentIndex ?? null;
 }

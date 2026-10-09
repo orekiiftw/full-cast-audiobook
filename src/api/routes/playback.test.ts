@@ -43,13 +43,8 @@ mock.module("../../books/ownership", () => ({
   ownedChapter: async () => ({ chapter: { id: CHAPTER_ID, bookId: BOOK_ID, chapterIndex: CHAPTER_INDEX } }),
 }));
 
-const chapterLookaheadCalls: Array<[string, number]> = [];
 const anchorLookaheadCalls: Array<[string, { chapterIndex: number; segmentIndex: number }]> = [];
 mock.module("../../orchestrator", () => ({
-  ensureChapterLookahead: (bookId: string, chapterIndex: number) => {
-    chapterLookaheadCalls.push([bookId, chapterIndex]);
-    return Promise.resolve();
-  },
   ensureLookahead: (bookId: string, anchor: { chapterIndex: number; segmentIndex: number }) => {
     anchorLookaheadCalls.push([bookId, anchor]);
     return Promise.resolve();
@@ -74,7 +69,6 @@ function syncReq(body: Record<string, unknown>): Request {
 }
 
 async function runSync(body: Record<string, unknown>) {
-  chapterLookaheadCalls.length = 0;
   anchorLookaheadCalls.length = 0;
   upserts = 0;
   const res = await dispatchRoute(playbackRoutes, syncReq(body), testUser);
@@ -89,15 +83,16 @@ describe("playback sync voicing-window re-centering", () => {
     expect(anchorLookaheadCalls).toEqual([[BOOK_ID, { chapterIndex: CHAPTER_INDEX, segmentIndex: 42 }]]);
   });
 
-  it("still voices the whole chapter plus the next on every sync", async () => {
-    await runSync({ segmentIndex: 42 });
-    expect(chapterLookaheadCalls).toEqual([[BOOK_ID, CHAPTER_INDEX]]);
+  it("stores the position and makes exactly one section-anchored lookahead call per sync", async () => {
+    await runSync({ segmentIndex: 43 });
+    expect(upserts).toBe(1);
+    expect(anchorLookaheadCalls).toEqual([[BOOK_ID, { chapterIndex: CHAPTER_INDEX, segmentIndex: 43 }]]);
   });
 
   it("does not re-center when the client omits segmentIndex", async () => {
     await runSync({});
     expect(anchorLookaheadCalls).toHaveLength(0);
-    expect(chapterLookaheadCalls).toEqual([[BOOK_ID, CHAPTER_INDEX]]);
+    expect(upserts).toBe(1);
   });
 
   it("rejects a non-positive segmentIndex before touching playback state", async () => {
