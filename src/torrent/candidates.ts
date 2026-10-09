@@ -16,18 +16,40 @@ const CANDIDATES_PER_PROVIDER = 3;
 
 const ALIVE_PROBE_MAX = 5;
 
-export async function resolveTorrentCandidates(title: string, author: string): Promise<TorrentCandidate[]> {
+const ALIVE_PROBE_BUDGET_S = 5;
+
+const ALIVE_PROBE_TIMEOUT_MS = (ALIVE_PROBE_BUDGET_S + 3) * 1000;
+
+const ALIVE_PROBE_PAUSE_MS = 10 * 60_000;
+
+let aliveProbePausedUntil = 0;
+
+interface SearchProvider {
+  name: string;
+  search: () => Promise<TorrentHit[]>;
+}
+
+export function resetAliveProbeCircuit(): void {
+  aliveProbePausedUntil = 0;
+}
+
+export async function resolveTorrentCandidates(
+  title: string,
+  author: string,
+  onProgress?: (message: string) => void,
+): Promise<TorrentCandidate[]> {
   const queries = buildTorrentSearchQueries(title, author);
   if (!queries.length) throw new Error("A book title is required for torrent search.");
   console.log(
     `🔍 Searching torrents using ${queries.length} query variant(s): ${queries.map((query) => JSON.stringify(query)).join(", ")}`,
   );
 
-  const candidates = candidatesFromHits(await gatherAllHits(queries, title, author));
+  const candidates = candidatesFromHits(await gatherAllHits(queries, title, author, onProgress));
   if (!candidates.length) return [];
 
+  onProgress?.(`Checking TorBox cache for ${candidates.length} candidate(s)...`);
   await applyCacheState(candidates);
-  await probeUncachedCandidates(candidates);
+  await probeUncachedCandidates(candidates, onProgress);
 
   candidates.sort((a, b) => candidateHealthRank(a) - candidateHealthRank(b) || b.seeds - a.seeds || a.name.localeCompare(b.name));
 
@@ -40,14 +62,20 @@ export async function isTorrentCached(hash: string): Promise<boolean> {
   return clean ? ((await batchCheckCached([clean])).get(clean) ?? false) : false;
 }
 
-async function gatherAllHits(queries: string[], title: string, author: string): Promise<TorrentHit[]> {
-  const hits: TorrentHit[] = [];
-  if (!torBoxSearchDown()) {
-    hits.push(...(await gatherProviderHits("torbox", () => searchTorBox(queries[0]), title, author)));
-  }
-  hits.push(...(await gatherProviderHits("apibay", () => searchApibay(queries), title, author)));
-  hits.push(...(await gatherProviderHits("torrents-csv", () => searchTorrentsCsv(queries), title, author)));
-  return hits;
+async function gatherAllHits(
+  queries: string[],
+  title: string,
+  author: string,
+  onProgress?: (message: string) => void,
+): Promise<TorrentHit[]> {
+  const providers: SearchProvider[] = [
+    ...(torBoxSearchDown() ? [] : [{ name: "torbox", search: () => searchTorBox(queries[0]) }]),
+    { name: "apibay", search: () => searchApibay(queries) },
+    { name: "torrents-csv", search: () => searchTorrentsCsv(queries) },
+  ];
+  onProgress?.(`Searching ${providers.map((provider) => provider.name).join(", ")}...`);
+  const hitsByProvider = await Promise.all(providers.map((provider) => gatherProviderHits(provider.name, provider.search, title, author)));
+  return hitsByProvider.flat();
 }
 
 function candidatesFromHits(hits: TorrentHit[]): TorrentCandidate[] {
@@ -74,11 +102,17 @@ async function applyCacheState(candidates: TorrentCandidate[]): Promise<void> {
   for (const candidate of candidates) candidate.cached = cached.get(candidate.hash) ?? false;
 }
 
-async function probeUncachedCandidates(candidates: TorrentCandidate[]): Promise<void> {
-  const uncached = candidates.filter((candidate) => !candidate.cached).sort((a, b) => b.seeds - a.seeds);
+async function probeUncachedCandidates(candidates: TorrentCandidate[], onProgress?: (message: string) => void): Promise<void> {
+  const apiKey = torBoxApiKey();
+  if (!apiKey || Date.now() < aliveProbePausedUntil) return;
+  const probed = candidates
+    .filter((candidate) => !candidate.cached)
+    .sort((a, b) => b.seeds - a.seeds)
+    .slice(0, ALIVE_PROBE_MAX);
+  if (probed.length) onProgress?.(`Checking ${probed.length} uncached candidate(s) for live seeders...`);
   await Promise.all(
-    uncached.slice(0, ALIVE_PROBE_MAX).map(async (candidate) => {
-      candidate.alive = await isTorrentAlive(candidate.hash);
+    probed.map(async (candidate) => {
+      candidate.alive = await isTorrentAlive(candidate.hash, apiKey);
     }),
   );
 }
@@ -119,23 +153,34 @@ async function batchCheckCached(hashes: string[]): Promise<Map<string, boolean>>
   return result;
 }
 
-async function isTorrentAlive(hash: string): Promise<boolean | null> {
-  const apiKey = torBoxApiKey();
-  if (!apiKey) return null;
+async function isTorrentAlive(hash: string, apiKey: string): Promise<boolean | null> {
   try {
     const response = await fetchApiWithValidatedRedirects(
-      `${MAIN_API_URL}/torrents/torrentinfo?hash=${cleanHash(hash)}&timeout=15&use_cache_lookup=true`,
+      `${MAIN_API_URL}/torrents/torrentinfo?hash=${cleanHash(hash)}&timeout=${ALIVE_PROBE_BUDGET_S}&use_cache_lookup=true`,
       TORBOX_API_HOSTS,
       {
         headers: { Authorization: `Bearer ${apiKey}` },
-        timeoutMs: 20_000,
+        timeoutMs: ALIVE_PROBE_TIMEOUT_MS,
       },
     );
-    if (!response.ok) return null;
+    if (!response.ok) {
+      const failure = await readJson<{ error?: string }>(response, "TorBox torrentinfo").catch(() => ({ error: undefined }));
+      if (failure.error !== "DOWNLOAD_SERVER_ERROR") pauseAliveProbe(`HTTP ${response.status}${failure.error ? ` ${failure.error}` : ""}`);
+      return null;
+    }
     const json = await readJson<{ success?: boolean; data?: { name?: string } | null }>(response, "TorBox torrentinfo");
     if (json.success && json.data) return true;
     return json.success === false ? false : null;
-  } catch {
+  } catch (error) {
+    pauseAliveProbe(errorMessage(error));
     return null;
   }
+}
+
+function pauseAliveProbe(reason: string): void {
+  if (Date.now() < aliveProbePausedUntil) return;
+  aliveProbePausedUntil = Date.now() + ALIVE_PROBE_PAUSE_MS;
+  console.warn(
+    `⚠️ TorBox liveness probe paused for ${ALIVE_PROBE_PAUSE_MS / 60_000} min (${sanitizeLogText(reason)}); ranking uncached candidates by seeders.`,
+  );
 }

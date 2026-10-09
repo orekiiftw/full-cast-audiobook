@@ -257,11 +257,15 @@ short TTL still lets a real change through.
 **Caps.** TorBox JSON 32 MB, error bodies 64 KB, downloads 200 MB (checked from `content-length`
 and again while streaming). Search gets 2 attempts with a 750 ms pause; unreachable, 401/403/404,
 and a `0 per ...` quota message trip a process-wide circuit breaker and fall through to the
-fallback indexers. Liveness probing is capped at 5 hashes per search. Downloads poll 60 times for a
+fallback indexers. Liveness probing is capped at 5 hashes per search, each with a 5 s TorBox
+metadata budget and an 8 s client timeout: TorBox holds an unreachable torrent for the whole budget
+and then answers 500 `DOWNLOAD_SERVER_ERROR`, which stays "unknown", while any other probe failure
+pauses probing for 10 minutes. Downloads poll 60 times for a
 cached torrent, 12 for an uncached one, at 10 s intervals.
 
 **Indexers and queries.** TorBox search (only the first variant, since it is the metered one),
-apibay (`cat=601`), then torrents-csv (`size=25`). Up to five `... epub` query variants — full
+apibay (`cat=601`), and torrents-csv (`size=25`), searched concurrently and merged in that order;
+each indexer runs its query variants one after another. Up to five `... epub` query variants — full
 author, surname, title-only, keyword fallbacks — after NFKC normalization; punctuation stripping is
 what keeps non-Latin titles alive, since a variant reducing to nothing is dropped.
 
@@ -310,7 +314,9 @@ in order — EPUB bytes, magnet/hash, `provider:id`, then `title-author` — so 
 submitting the same provider book never collide. Caps: 80 MB EPUB, 81 MB multipart envelope (the
 extra megabyte absorbs boundary overhead), 5 MB JSON, 32 KB search. A duplicate whose existing row
 is `failed` is retried rather than returned dead, since the user's intent was clearly to process
-it. Multipart parser errors are flattened to one constant message so internals never leak.
+it. The insert runs first and the `(user_id, source_hash)` unique constraint is the dedupe check, so
+a new book costs one database round trip and only a conflict reads the existing row. Multipart
+parser errors are flattened to one constant message so internals never leak.
 
 **Audio streaming** authorizes before touching storage: keys under `books/<uuid>/` are checked by
 owning that book, anything else against the user's own cover, EPUB, chapter-audio, and segment-audio
@@ -406,4 +412,6 @@ long pause used to tick down and expire mid-pause.
 **SSE reconnects** with exponential backoff (1 s base, 30 s cap). A native `EventSource` sends
 cookies but does not expose the status, so on error the hook probes `/api/auth/me` first: a 401
 ends the stream instead of retrying forever. Events emitted during an outage are lost, so
-`onReconnect` triggers a refetch — otherwise SSE-only views would stay stale.
+`onReconnect` triggers a refetch — otherwise SSE-only views would stay stale. A new stream first
+replays the book's current discovery stage (its latest `discovering` message and progress line),
+because a just-added book announces those stages before the client has subscribed.

@@ -19,7 +19,7 @@ if (!databaseUrl) {
 const pool = new Pool({
   connectionString: databaseUrl,
   max: 25,
-  idleTimeoutMillis: 60_000,
+  idleTimeoutMillis: 10 * 60_000,
   connectionTimeoutMillis: 30_000,
   keepAlive: true,
   keepAliveInitialDelayMillis: 10_000,

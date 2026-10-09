@@ -43,7 +43,7 @@ export async function insertBook(userId: string, submission: BookSubmission, sou
   }
 }
 
-export async function persistAndEnqueue(bookId: string, submission: BookSubmission): Promise<void> {
+export async function persistAndEnqueue(bookId: string, submission: BookSubmission): Promise<string | undefined> {
   let epubR2Key: string | undefined;
   try {
     if (submission.epubBuffer) {
@@ -58,6 +58,7 @@ export async function persistAndEnqueue(bookId: string, submission: BookSubmissi
     } else {
       await queueBookIngestion(bookId, { torrentQuery: { title: submission.title, author: submission.author } });
     }
+    return epubR2Key;
   } catch (error) {
     if (epubR2Key) await deleteFile(epubR2Key).catch(() => {});
     throw error;

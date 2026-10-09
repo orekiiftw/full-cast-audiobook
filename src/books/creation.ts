@@ -16,10 +16,12 @@ export async function submitBook(userId: string, submission: BookSubmission): Pr
   assertSubmissionHasSource(submission);
 
   const sourceHash = hashSubmission(submission);
-  const existing = await findBookBySourceHash(userId, sourceHash);
-  if (existing) return reuseExistingBook(existing);
+  const created = await insertBook(userId, submission, sourceHash);
+  if (created) return queueCreatedBook(created, submission);
 
-  return createAndQueueBook(userId, submission, sourceHash);
+  const existing = await findBookBySourceHash(userId, sourceHash);
+  if (!existing) throw new Error("Book insert failed without a conflicting row.");
+  return reuseExistingBook(existing);
 }
 
 async function acquireProviderBook(submission: BookSubmission): Promise<void> {
@@ -40,16 +42,10 @@ async function reuseExistingBook(existing: BookRow): Promise<BookCreationResult>
   return { ok: true, book: await findBookById(existing.id) };
 }
 
-async function createAndQueueBook(userId: string, submission: BookSubmission, sourceHash: string): Promise<BookCreationResult> {
-  const created = await insertBook(userId, submission, sourceHash);
-  if (!created) {
-    const raced = await findBookBySourceHash(userId, sourceHash);
-    if (raced) return { ok: true, book: raced };
-    throw new Error("Book insert failed without a conflicting row.");
-  }
-
+async function queueCreatedBook(created: BookRow, submission: BookSubmission): Promise<BookCreationResult> {
   try {
-    await persistAndEnqueue(created.id, submission);
+    const epubR2Key = await persistAndEnqueue(created.id, submission);
+    return { ok: true, book: epubR2Key ? { ...created, epubR2Key } : created };
   } catch (error) {
     await db
       .delete(books)
@@ -57,6 +53,4 @@ async function createAndQueueBook(userId: string, submission: BookSubmission, so
       .catch(() => {});
     throw error;
   }
-
-  return { ok: true, book: (await findBookById(created.id)) ?? created };
 }

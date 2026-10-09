@@ -33,15 +33,23 @@ const BOOK_ROW = {
 
 let getBookCalls = 0;
 
+const dbCalls: string[] = [];
+
 const mockDb = {
   select: () => ({
     from: () => ({
-      where: () => Promise.resolve([]),
+      where: () => {
+        dbCalls.push("select");
+        return Promise.resolve([]);
+      },
     }),
   }),
   insert: () => ({
     values: () => ({
-      returning: () => Promise.resolve([BOOK_ROW]),
+      returning: () => {
+        dbCalls.push("insert");
+        return Promise.resolve([BOOK_ROW]);
+      },
     }),
   }),
   update: () => ({
@@ -122,5 +130,20 @@ describe("POST /api/books provider lookup throttling", () => {
     const throttled = await dispatchRoute(bookRoutes, providerBookReq(60), testUser);
     expect(throttled.status).toBe(429);
     expect(getBookCalls).toBe(60);
+  });
+});
+
+describe("POST /api/books database round trips", () => {
+  it("creates a new title-only book with a single insert and no extra reads", async () => {
+    const form = new FormData();
+    form.append("title", "The Time Machine");
+    form.append("author", "H. G. Wells");
+    dbCalls.length = 0;
+
+    const res = await dispatchRoute(bookRoutes, new Request("http://localhost/api/books", { method: "POST", body: form }), testUser);
+
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { id: string }).id).toBe(BOOK_ID);
+    expect(dbCalls).toEqual(["insert"]);
   });
 });

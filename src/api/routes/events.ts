@@ -1,4 +1,4 @@
-import { pipelineEvents } from "../../queue";
+import { discoveryStageMessages, pipelineEvents } from "../../queue";
 import { corsHeaders, json } from "../response";
 import { type RouteContext, type RouteTable } from "../route";
 import { requireUuid } from "../../lib/validators";
@@ -71,6 +71,9 @@ function startEventPump(
 
   send("retry: 10000\n\n");
   pipelineEvents.on("progress", forwardProgress);
+  for (const message of discoveryStageMessages(bookId)) {
+    send(`data: ${JSON.stringify({ bookId, type: "progress_log", message, timestamp: Date.now() })}\n\n`);
+  }
 
   let cleanedUp = false;
   let heartbeat: ReturnType<typeof setInterval>;

@@ -86,7 +86,9 @@ async function acquireFromTorrentQuery(bookId: string, query: { title: string; a
 
 async function searchTorrentCandidates(bookId: string, title: string, author: string): Promise<TorrentCandidate[]> {
   try {
-    const liveCandidates = await resolveTorrentCandidates(title, author);
+    const liveCandidates = await resolveTorrentCandidates(title, author, (progressMessage) => {
+      emitProgressEvent(bookId, "progress_log", { message: progressMessage });
+    });
     if (liveCandidates.length > 0) return liveCandidates;
   } catch (error) {
     const message = errorMessage(error);
