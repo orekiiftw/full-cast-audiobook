@@ -1,0 +1,11 @@
+[Unit]
+Description=Narratea auto-deploy (pull origin/main when CI is green)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/mnt/book_data/narratea
+ExecStart=/mnt/book_data/narratea/deploy/vps/narratea-deploy.sh
+TimeoutStartSec=1800
