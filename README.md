@@ -141,3 +141,7 @@ For local frontend hot-reloading:
 bun run dev:client
 ```
 Navigate to `http://localhost:5173`. Frontend API calls are automatically proxied to the Bun server on port 3000.
+
+## Deployment
+
+`main` is the deploy branch. GitHub Actions runs format, typecheck, tests and the client build on every push and pull request, and on the VPS a two-minute systemd timer pulls `origin/main` once that commit's checks are green, then installs dependencies, builds the client, runs migrations and restarts `narratea.service`. Details, logs and rollback: [deploy/vps/README.md](deploy/vps/README.md).
