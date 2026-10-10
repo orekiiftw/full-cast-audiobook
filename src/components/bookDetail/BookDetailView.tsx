@@ -3,7 +3,8 @@ import { ChapterList } from "./ChapterList";
 import { NarratorCard } from "./NarratorCard";
 import { PronunciationEditor } from "./PronunciationEditor";
 import { StudioConsole } from "./StudioConsole";
-import { Icon } from "../ui";
+import { DETAIL_GRID_CLASS, DETAIL_PAGE_CLASS } from "./layout";
+import { Button, Icon } from "../ui";
 import type { BookDetailModel } from "./useBookDetail";
 import type { NarratorPreviewModel } from "./useNarratorPreview";
 import type { BookMaintenanceModel } from "./useBookMaintenance";
@@ -22,14 +23,11 @@ interface BookDetailViewProps {
 
 export function BookDetailView({ book, detail, preview, dictionary, maintenance, activeChapterId, onBack }: BookDetailViewProps) {
   return (
-    <div className="max-w-6xl mx-auto px-5 sm:px-6 py-10 sm:py-12 animate-fade-up">
-      <button
-        onClick={onBack}
-        className="label-caps text-cinema-400 hover:text-gold-300 mb-10 transition-colors flex items-center gap-1.5 group"
-      >
-        <Icon name="chevronLeft" size={14} className="transition-transform group-hover:-translate-x-0.5" />
+    <div className={DETAIL_PAGE_CLASS}>
+      <Button variant="ghost" size="sm" onClick={onBack} className="group -ml-2 mb-6 pl-2 pr-3.5">
+        <Icon name="chevronLeft" size={16} className="transition-transform duration-base group-hover:-translate-x-0.5" />
         Library
-      </button>
+      </Button>
 
       <BookHero
         book={book}
@@ -46,20 +44,30 @@ export function BookDetailView({ book, detail, preview, dictionary, maintenance,
         onDelete={() => void maintenance.remove(book.title)}
       />
 
-      {detail.isWorking && <StudioConsole progressLog={detail.progressLog} bookStatus={book.status} />}
-
-      {detail.narrator && (
-        <NarratorCard narrator={detail.narrator} playingPreviewId={preview.playingPreviewId} onPlayPreview={preview.playPreview} />
+      {detail.isWorking && (
+        <div className="mt-8">
+          <StudioConsole progressLog={detail.progressLog} bookStatus={book.status} />
+        </div>
       )}
 
-      <ChapterList
-        chapters={detail.chapters}
-        progress={detail.segmentProgress}
-        activeChapterId={activeChapterId}
-        onSelect={detail.selectChapter}
-      />
+      <div className={DETAIL_GRID_CLASS}>
+        <div className="min-w-0 lg:col-span-2">
+          <ChapterList
+            chapters={detail.chapters}
+            progress={detail.segmentProgress}
+            activeChapterId={activeChapterId}
+            onSelect={detail.selectChapter}
+            working={detail.isWorking}
+          />
+        </div>
 
-      <PronunciationEditor terms={detail.pronunciation} form={dictionary} />
+        <aside aria-label="Performance settings" className="min-w-0 space-y-10">
+          {detail.narrator && (
+            <NarratorCard narrator={detail.narrator} playingPreviewId={preview.playingPreviewId} onPlayPreview={preview.playPreview} />
+          )}
+          <PronunciationEditor terms={detail.pronunciation} form={dictionary} />
+        </aside>
+      </div>
     </div>
   );
 }

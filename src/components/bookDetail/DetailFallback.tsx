@@ -1,4 +1,5 @@
-import { Button, Icon } from "../ui";
+import { Button, EmptyState, Icon } from "../ui";
+import { DETAIL_PAGE_CLASS } from "./layout";
 
 interface DetailFallbackProps {
   title: string;
@@ -8,28 +9,30 @@ interface DetailFallbackProps {
 }
 
 export function DetailFallback({ title, message, onBack, onRetry }: DetailFallbackProps) {
-  const backButton = (
-    <Button variant="secondary" onClick={onBack}>
-      <Icon name="chevronLeft" size={16} />
-      Back to Library
-    </Button>
-  );
-
   return (
-    <div className="max-w-6xl mx-auto px-5 sm:px-6 py-20 text-center">
-      <h1 className="font-serif text-3xl font-medium mb-3 text-gradient">{title}</h1>
-      <p className="text-cinema-400 text-sm mb-8">{message}</p>
-      {onRetry ? (
-        <div className="flex justify-center gap-3">
-          {backButton}
-          <Button variant="primary" onClick={onRetry}>
-            <Icon name="refresh" size={14} />
-            Retry
-          </Button>
-        </div>
-      ) : (
-        backButton
-      )}
+    <div className={DETAIL_PAGE_CLASS}>
+      <EmptyState
+        headingLevel="h1"
+        tone={onRetry ? "danger" : "neutral"}
+        icon={onRetry ? "alert" : "book"}
+        title={title}
+        description={message}
+        className="mt-4 animate-rise"
+        actions={
+          <>
+            <Button onClick={onBack}>
+              <Icon name="chevronLeft" size={16} />
+              Back to Library
+            </Button>
+            {onRetry && (
+              <Button variant="primary" onClick={onRetry}>
+                <Icon name="refresh" size={16} />
+                Try again
+              </Button>
+            )}
+          </>
+        }
+      />
     </div>
   );
 }

@@ -1,13 +1,23 @@
 import type { ReactNode, MouseEvent, KeyboardEvent } from "react";
 
+type Elevation = 0 | 1 | 2 | 3;
+
+const ELEVATIONS: Record<Elevation, string> = {
+  0: "border-line-hairline bg-surface-1",
+  1: "border-line-hairline bg-surface-2 shadow-e-1",
+  2: "border-line-strong bg-surface-2 shadow-e-2",
+  3: "border-line-strong bg-surface-3 shadow-e-3",
+};
+
 interface CardProps {
   children: ReactNode;
   className?: string;
   onClick?: (e: MouseEvent<HTMLDivElement> | KeyboardEvent<HTMLDivElement>) => void;
   isInteractive?: boolean;
+  elevation?: Elevation;
 }
 
-export function Card({ children, className = "", onClick, isInteractive = false }: CardProps) {
+export function Card({ children, className = "", onClick, isInteractive = false, elevation = 1 }: CardProps) {
   return (
     <div
       onClick={onClick}
@@ -24,9 +34,10 @@ export function Card({ children, className = "", onClick, isInteractive = false 
           : undefined
       }
       className={[
-        "rounded-2xl border border-white/[0.06] bg-cinema-900/50 backdrop-blur-sm shadow-card",
-        isInteractive && "transition-all duration-300 ease-out-expo hover:border-white/[0.1] hover:bg-cinema-850/70 hover:shadow-elevated",
-        onClick && isInteractive && "cursor-pointer",
+        "rounded-panel border",
+        ELEVATIONS[elevation],
+        isInteractive ? "transition duration-base ease-standard hover:border-line-control hover:bg-surface-3" : "",
+        onClick && isInteractive ? "cursor-pointer" : "",
         className,
       ].join(" ")}
     >

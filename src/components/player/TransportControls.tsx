@@ -1,4 +1,4 @@
-import { Icon } from "../ui";
+import { Icon, IconButton } from "../ui";
 
 type TransportControlsVariant = "collapsed" | "expanded";
 
@@ -14,9 +14,6 @@ interface TransportControlsProps {
 
 export type PlayerTransportControls = Omit<TransportControlsProps, "variant">;
 
-const TRANSPORT_BUTTON_CLASS =
-  "text-cinema-400 hover:text-white disabled:opacity-25 disabled:cursor-not-allowed transition-colors duration-200 p-2.5 -m-1 rounded-full";
-
 export function TransportControls({
   variant,
   canGoPrev,
@@ -26,25 +23,22 @@ export function TransportControls({
   togglePlayPause,
   isPlaying,
 }: TransportControlsProps) {
-  const iconSize = variant === "collapsed" ? 20 : 22;
-  const playBtnSize = variant === "collapsed" ? "w-12 h-12" : "w-14 h-14";
-  const playBtnShadow = variant === "collapsed" ? "shadow-glow-sm" : "shadow-glow";
+  const expanded = variant === "expanded";
 
   return (
-    <>
-      <button disabled={!canGoPrev} onClick={goToPrev} className={TRANSPORT_BUTTON_CLASS} aria-label="Previous segment">
-        <Icon name="skipBack" size={iconSize} />
-      </button>
+    <div className={`flex items-center ${expanded ? "gap-4 sm:gap-6" : "gap-1 sm:gap-2"}`}>
+      <IconButton icon="skipBack" label="Previous segment" size={expanded ? "lg" : "md"} disabled={!canGoPrev} onClick={goToPrev} />
       <button
+        type="button"
         onClick={togglePlayPause}
-        className={`${playBtnSize} rounded-full bg-gradient-to-b from-gold-300 to-gold-500 text-cinema-950 flex items-center justify-center ${playBtnShadow} hover:scale-105 active:scale-95 transition-transform border border-gold-200/20`}
         aria-label={isPlaying ? "Pause" : "Play"}
+        className={`flex shrink-0 items-center justify-center rounded-full bg-gold-300 text-ink-inverse shadow-accent-press transition duration-fast ease-standard hover:bg-gold-200 hover:shadow-accent-lift active:scale-95 ${
+          expanded ? "h-16 w-16" : "h-12 w-12"
+        }`}
       >
-        <Icon name={isPlaying ? "pause" : "play"} size={iconSize} />
+        <Icon name={isPlaying ? "pause" : "play"} size={expanded ? 26 : 20} className={isPlaying ? "" : "translate-x-px"} />
       </button>
-      <button disabled={!canGoNext} onClick={goToNext} className={TRANSPORT_BUTTON_CLASS} aria-label="Next segment">
-        <Icon name="skipForward" size={iconSize} />
-      </button>
-    </>
+      <IconButton icon="skipForward" label="Next segment" size={expanded ? "lg" : "md"} disabled={!canGoNext} onClick={goToNext} />
+    </div>
   );
 }

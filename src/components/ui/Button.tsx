@@ -1,40 +1,61 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { Spinner } from "./Spinner";
 
-const variants = {
-  primary: "bg-gold-300 text-cinema-950 hover:bg-gold-200 border border-transparent shadow-sm",
-  secondary: "bg-cinema-800 text-cinema-100 hover:bg-cinema-700 border border-white/10 hover:border-white/20",
-  ghost: "text-cinema-300 hover:text-white hover:bg-white/[0.06]",
-  danger: "bg-red-950/50 text-red-200 hover:bg-red-900/50 border border-red-900/40 hover:border-red-800/60",
+type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+type ButtonSize = "sm" | "md" | "lg";
+
+const VARIANTS: Record<ButtonVariant, string> = {
+  primary: "bg-gold-300 text-ink-inverse shadow-accent-press enabled:hover:bg-gold-200 enabled:hover:shadow-accent-lift",
+  secondary:
+    "border border-line-strong bg-surface-3 text-ink-primary shadow-e-1 enabled:hover:border-line-control enabled:hover:bg-surface-4",
+  ghost: "text-ink-secondary enabled:hover:bg-surface-3 enabled:hover:text-ink-primary",
+  danger: "border border-danger-400/35 bg-danger-500/10 text-danger-300 enabled:hover:border-danger-400/70 enabled:hover:bg-danger-500/20",
 };
 
-const sizes = {
-  sm: "min-h-10 px-3.5 py-2 text-xs rounded-full",
-  md: "min-h-11 px-5 py-2.5 text-sm rounded-full",
-  lg: "min-h-12 px-6 py-3 text-sm rounded-full",
+const SIZES: Record<ButtonSize, string> = {
+  sm: "h-10 gap-1.5 px-4 text-caption",
+  md: "h-11 gap-2 px-5 text-body",
+  lg: "h-12 gap-2 px-6 text-body-lg",
 };
+
+const SPINNER_SIZE: Record<ButtonSize, number> = { sm: 14, md: 16, lg: 16 };
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: "primary" | "secondary" | "ghost" | "danger";
-  size?: "sm" | "md" | "lg";
+  variant?: ButtonVariant;
+  size?: ButtonSize;
   isLoading?: boolean;
   children: ReactNode;
 }
 
-export function Button({ variant = "secondary", size = "md", isLoading, children, className = "", disabled, ...rest }: ButtonProps) {
+export function Button({
+  variant = "secondary",
+  size = "md",
+  isLoading = false,
+  children,
+  className = "",
+  disabled,
+  type = "button",
+  ...rest
+}: ButtonProps) {
+  const inactive = !!disabled && !isLoading;
+
   return (
     <button
+      type={type}
       className={[
-        "inline-flex items-center justify-center gap-2 font-semibold tracking-tight transition-all duration-200",
-        "focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-cinema-950",
-        "disabled:opacity-45 disabled:cursor-not-allowed active:scale-[0.98]",
-        variants[variant],
-        sizes[size],
+        "touch-target inline-flex select-none items-center justify-center whitespace-nowrap rounded-full font-semibold tracking-tight",
+        "transition duration-fast ease-standard enabled:active:translate-y-px",
+        VARIANTS[variant],
+        SIZES[size],
+        inactive ? "cursor-not-allowed opacity-50 shadow-none" : "",
+        isLoading ? "cursor-progress" : "",
         className,
       ].join(" ")}
       disabled={disabled || isLoading}
+      aria-busy={isLoading || undefined}
       {...rest}
     >
-      {isLoading && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />}
+      {isLoading && <Spinner size={SPINNER_SIZE[size]} />}
       {children}
     </button>
   );

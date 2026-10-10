@@ -1,8 +1,16 @@
-import { Badge } from "../ui";
+import { Badge, Icon, Spinner, type IconName } from "../ui";
 import { BookCover } from "./BookCover";
 import { BookHeroActions } from "./BookHeroActions";
 import { isBookWorking, type SegmentProgress } from "./detailsData";
-import type { Book, CastMember, Chapter } from "../../types/api";
+import { bookStatusOf } from "../library/bookStatus";
+import { audioUrl } from "../../lib/audioUrl";
+import type { Book, BookStatus, CastMember, Chapter } from "../../types/api";
+
+const WORKING_NOTES: Partial<Record<BookStatus, string>> = {
+  discovering: "Finding a DRM-free copy and reading its chapters.",
+  casting: "Casting the narrator and preparing the first chapter.",
+  in_progress: "Performing chapter by chapter. You can listen as lines finish.",
+};
 
 interface BookHeroProps {
   book: Book;
@@ -34,62 +42,100 @@ export function BookHero({
   onDelete,
 }: BookHeroProps) {
   const liveChapter = findLiveChapter(chapters, segmentProgress);
+  const status = bookStatusOf(book.status);
+  const coverSrc = book.coverR2Key ? audioUrl(book.coverR2Key) : null;
+  const workingNote = isBookWorking(book) ? WORKING_NOTES[book.status] : undefined;
 
   return (
-    <div className="relative flex flex-col sm:flex-row gap-10 items-start mb-16">
-      <div className="pointer-events-none absolute -left-16 -top-10 h-56 w-56 rounded-full bg-gold-500/10 blur-3xl" />
+    <section
+      aria-labelledby="book-title"
+      className="relative isolate overflow-hidden rounded-stage border border-line-hairline bg-surface-1 shadow-e-2 animate-rise"
+    >
+      {coverSrc ? (
+        <div aria-hidden="true" className="cover-backdrop -z-20" style={{ backgroundImage: `url("${coverSrc}")` }} />
+      ) : (
+        <div aria-hidden="true" className="atmosphere -z-20" />
+      )}
+      <div aria-hidden="true" className="absolute inset-0 -z-10 bg-gradient-to-b from-surface-1/30 via-surface-1/75 to-surface-1" />
 
-      <BookCover book={book} />
+      <div className="flex flex-col items-center gap-8 p-6 sm:flex-row sm:items-start sm:gap-10 sm:p-10 lg:gap-12 lg:p-12">
+        <BookCover book={book} />
 
-      <div className="relative flex-1 text-center sm:text-left space-y-6 w-full">
-        <div>
-          <h1 className="font-serif text-3xl sm:text-4xl md:text-5xl font-medium tracking-tight mb-3 text-balance text-gradient leading-[1.1]">
+        <div className="flex w-full min-w-0 flex-1 flex-col items-center text-center sm:items-start sm:pt-2 sm:text-left">
+          <Badge tone={status.tone} pulse={status.pulse}>
+            {status.label}
+          </Badge>
+          <h1
+            id="book-title"
+            className="mt-4 max-w-3xl text-balance break-words font-serif text-display-md font-medium text-ink-primary sm:text-display-lg lg:text-display-xl"
+          >
             {book.title}
           </h1>
-          <p className="text-cinema-400 text-lg italic font-serif">by {book.author}</p>
+          <p className="mt-2 font-serif text-title-md italic text-ink-secondary">by {book.author.trim() || "Unknown author"}</p>
+
+          <BookMeta narrator={narrator} chapters={chapters} pronunciationCount={pronunciationCount} />
+
+          {workingNote && (
+            <p className="mt-6 flex items-center gap-2.5 text-caption text-ink-secondary">
+              <Spinner size={14} className="text-gold-300" />
+              {workingNote}
+            </p>
+          )}
+
+          <BookHeroActions
+            book={book}
+            liveChapter={liveChapter}
+            progress={liveChapter ? segmentProgress[liveChapter.id] : undefined}
+            isLiveChapterActive={liveChapter?.id === activeChapterId}
+            canRetry={canRetry}
+            retrying={retrying}
+            deleting={deleting}
+            onRetry={onRetry}
+            onDelete={onDelete}
+            onPlayChapter={onPlayChapter}
+          />
         </div>
-
-        <BookMeta book={book} narrator={narrator} chapterCount={chapters.length} pronunciationCount={pronunciationCount} />
-
-        <BookHeroActions
-          book={book}
-          liveChapter={liveChapter}
-          progress={liveChapter ? segmentProgress[liveChapter.id] : undefined}
-          isLiveChapterActive={liveChapter?.id === activeChapterId}
-          canRetry={canRetry}
-          retrying={retrying}
-          deleting={deleting}
-          onRetry={onRetry}
-          onDelete={onDelete}
-          onPlayChapter={onPlayChapter}
-        />
       </div>
-    </div>
+    </section>
   );
 }
 
 interface BookMetaProps {
-  book: Book;
   narrator: CastMember | null;
-  chapterCount: number;
+  chapters: Chapter[];
   pronunciationCount: number;
 }
 
-function BookMeta({ book, narrator, chapterCount, pronunciationCount }: BookMetaProps) {
+function BookMeta({ narrator, chapters, pronunciationCount }: BookMetaProps) {
+  const runtime = totalRuntime(chapters);
+  const items: Array<{ icon: IconName; label: string }> = [
+    { icon: "book", label: `${chapters.length} ${chapters.length === 1 ? "chapter" : "chapters"}` },
+    ...(runtime ? [{ icon: "clock" as const, label: runtime }] : []),
+    { icon: "microphone", label: `Voiced by ${narrator?.ttsVoiceName ?? "Mia"}` },
+    { icon: "pen", label: `${pronunciationCount} pronunciation ${pronunciationCount === 1 ? "guide" : "guides"}` },
+  ];
+
   return (
-    <div className="flex justify-center sm:justify-start items-center gap-3 flex-wrap">
-      <Badge tone={book.status === "ready" ? "emerald" : book.status === "failed" ? "red" : "gold"} pulse={isBookWorking(book)}>
-        {book.status}
-      </Badge>
-      <span className="text-[11px] text-cinema-500 tracking-wide">
-        {chapterCount} chapters
-        <span className="mx-1.5 text-cinema-700">·</span>
-        Voiced by {narrator?.ttsVoiceName ?? "Mia"}
-        <span className="mx-1.5 text-cinema-700">·</span>
-        {pronunciationCount} guides
-      </span>
-    </div>
+    <ul role="list" className="mt-6 flex flex-wrap justify-center gap-x-5 gap-y-2 text-caption text-ink-secondary sm:justify-start">
+      {items.map((item) => (
+        <li key={item.icon} className="flex items-center gap-1.5">
+          <Icon name={item.icon} size={16} className="text-ink-tertiary" />
+          <span className="tabular-nums">{item.label}</span>
+        </li>
+      ))}
+    </ul>
   );
+}
+
+// Runtime is only meaningful once every chapter has a final duration.
+function totalRuntime(chapters: Chapter[]): string | null {
+  if (chapters.length === 0 || chapters.some((chapter) => chapter.status !== "ready" || chapter.durationMs == null)) return null;
+  const totalMinutes = Math.round(chapters.reduce((sum, chapter) => sum + (chapter.durationMs ?? 0), 0) / 60_000);
+  if (totalMinutes < 1) return null;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return `${minutes} min`;
+  return minutes === 0 ? `${hours} h` : `${hours} h ${minutes} min`;
 }
 
 function findLiveChapter(chapters: Chapter[], segmentProgress: SegmentProgress): Chapter | undefined {

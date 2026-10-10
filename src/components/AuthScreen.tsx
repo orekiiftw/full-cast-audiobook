@@ -10,11 +10,14 @@ export function AuthScreen({ onAuthenticated, sessionExpired = false }: AuthScre
   const form = useAuthForm(onAuthenticated);
 
   return (
-    <main className="auth-shell grainy min-h-screen text-cinema-100 font-sans">
-      <div className="auth-orb auth-orb--gold" aria-hidden="true" />
-      <div className="auth-orb auth-orb--violet" aria-hidden="true" />
+    <main className="relative isolate min-h-screen overflow-hidden bg-surface-0 font-sans text-ink-primary">
+      <div className="atmosphere -z-10" aria-hidden="true" />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-y-0 left-1/2 -z-10 hidden w-px bg-gradient-to-b from-transparent via-line-hairline to-transparent lg:block"
+      />
 
-      <div className="relative z-10 mx-auto grid min-h-screen max-w-6xl items-center gap-12 px-5 py-10 sm:px-6 lg:grid-cols-[1.08fr_0.92fr] lg:gap-20 lg:py-16">
+      <div className="mx-auto grid min-h-screen w-full max-w-lg content-center items-center gap-10 px-5 py-10 sm:px-8 lg:max-w-6xl sm:py-14 lg:grid-cols-2 lg:gap-16 lg:py-16 xl:gap-24">
         <AuthIntro />
         <AuthCard form={form} sessionExpired={sessionExpired} />
       </div>

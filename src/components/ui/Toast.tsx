@@ -1,10 +1,17 @@
-import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
+import { IconButton } from "./IconButton";
+
+const MAX_VISIBLE = 3;
+
+const DURATION_MS = { info: 4000, error: 6500 } as const;
+
+type ToastTone = "info" | "error";
 
 interface Toast {
   id: string;
   message: string;
-  tone?: "info" | "error";
+  tone?: ToastTone;
 }
 
 interface ToastContextValue {
@@ -25,36 +32,77 @@ interface ToastProviderProps {
 
 export function ToastProvider({ children }: ToastProviderProps) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const seqRef = useRef(0);
 
-  const showToast = useCallback((message: string, tone: Toast["tone"] = "info") => {
-    const id = `${Date.now()}-${Math.random()}`;
+  const showToast = useCallback((message: string, tone: ToastTone = "info") => {
+    const id = `${Date.now()}-${++seqRef.current}`;
     setToasts((prev) => [...prev, { id, message, tone }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
+  }, []);
+
+  const dismiss = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((toast) => toast.id !== id));
   }, []);
 
   const value = useMemo(() => ({ showToast }), [showToast]);
+  const visible = toasts.slice(-MAX_VISIBLE);
 
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="pointer-events-none fixed bottom-32 left-0 right-0 z-[60] flex flex-col items-center gap-2 px-4">
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className={[
-              "pointer-events-auto flex items-center gap-2.5 rounded-full border px-4 py-2.5 text-sm shadow-elevated backdrop-blur-xl animate-fade-up",
-              toast.tone === "error"
-                ? "border-red-900/40 bg-red-950/85 text-red-100"
-                : "border-white/[0.08] bg-cinema-900/90 text-cinema-100",
-            ].join(" ")}
-          >
-            {toast.tone === "error" && <Icon name="x" size={14} className="text-red-400" />}
-            <span className="font-medium tracking-tight">{toast.message}</span>
-          </div>
+      <section
+        aria-label="Notifications"
+        aria-live="polite"
+        className="toast-region pointer-events-none fixed inset-x-0 z-toast flex flex-col items-center gap-2 px-4"
+      >
+        {visible.map((toast) => (
+          <ToastItem key={toast.id} toast={toast} onDismiss={dismiss} />
         ))}
-      </div>
+      </section>
     </ToastContext.Provider>
+  );
+}
+
+function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string) => void }) {
+  const tone = toast.tone ?? "info";
+  const [paused, setPaused] = useState(false);
+  const remainingRef = useRef<number>(DURATION_MS[tone]);
+
+  useEffect(() => {
+    if (paused) return;
+    const startedAt = Date.now();
+    const timer = window.setTimeout(() => onDismiss(toast.id), remainingRef.current);
+    return () => {
+      window.clearTimeout(timer);
+      remainingRef.current = Math.max(1200, remainingRef.current - (Date.now() - startedAt));
+    };
+  }, [paused, onDismiss, toast.id]);
+
+  const isError = tone === "error";
+
+  return (
+    <div
+      role={isError ? "alert" : "status"}
+      onPointerEnter={() => setPaused(true)}
+      onPointerLeave={() => setPaused(false)}
+      onFocus={() => setPaused(true)}
+      onBlur={() => setPaused(false)}
+      className={[
+        "pointer-events-auto flex w-full max-w-md animate-rise items-start gap-3 rounded-tile border bg-surface-3 py-2.5 pl-3.5 pr-1.5 shadow-e-3",
+        isError ? "border-danger-400/40" : "border-line-strong",
+      ].join(" ")}
+    >
+      <span
+        className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
+          isError ? "bg-danger-500/15 text-danger-300" : "bg-gold-500/15 text-gold-300"
+        }`}
+      >
+        <Icon name={isError ? "alert" : "info"} size={14} />
+      </span>
+      <p className="min-w-0 flex-1 break-words py-0.5 text-body text-ink-primary">
+        <span className="sr-only">{isError ? "Error: " : ""}</span>
+        {toast.message}
+      </p>
+      <IconButton icon="x" label="Dismiss notification" size="sm" onClick={() => onDismiss(toast.id)} />
+    </div>
   );
 }

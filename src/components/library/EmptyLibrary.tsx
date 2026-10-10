@@ -1,4 +1,4 @@
-import { Button, Icon } from "../ui";
+import { Button, CoverArt, EmptyState, Icon } from "../ui";
 import { CLASSICS, type Classic } from "./classics";
 
 interface EmptyLibraryProps {
@@ -8,40 +8,52 @@ interface EmptyLibraryProps {
 
 export function EmptyLibrary({ onSelectClassic, onAddBook }: EmptyLibraryProps) {
   return (
-    <div className="relative mt-8 overflow-hidden rounded-[2rem] border border-white/[0.06] bg-gradient-to-b from-cinema-900/80 to-cinema-950/60 px-8 py-16 sm:px-14 sm:py-20 text-center shadow-elevated">
-      <div className="pointer-events-none absolute inset-0 bg-mesh-gold opacity-80" />
-      <div className="pointer-events-none absolute -top-20 left-1/2 h-48 w-72 -translate-x-1/2 rounded-full bg-gold-500/10 blur-3xl" />
-      <div className="relative">
-        <div className="mx-auto mb-8 flex h-16 w-16 items-center justify-center rounded-2xl border border-gold-500/20 bg-gradient-to-br from-gold-500/15 to-transparent text-gold-400 shadow-glow-sm">
-          <Icon name="book" size={28} />
-        </div>
-        <h2 className="font-serif text-3xl sm:text-4xl font-medium tracking-tight text-gradient mb-3">Begin a performance</h2>
-        <p className="text-cinema-400 text-sm sm:text-[15px] mb-10 leading-relaxed max-w-md mx-auto">
-          Upload a DRM-free EPUB, search the stacks, or start with a classic.
-        </p>
-        <div className="flex flex-col gap-2 max-w-sm mx-auto">
-          {CLASSICS.map((classic) => (
+    <EmptyState
+      icon="book"
+      eyebrow="An empty stage"
+      title="Begin a performance"
+      description="Upload a DRM-free EPUB, look a title up by name, or start with one of these classics."
+      className="animate-rise"
+      actions={
+        <Button variant="primary" size="lg" onClick={onAddBook}>
+          <Icon name="plus" size={18} />
+          Add your own
+        </Button>
+      }
+    >
+      <ul role="list" aria-label="Start with a classic" className="grid gap-3 text-left sm:grid-cols-3">
+        {CLASSICS.map((classic) => (
+          <li key={classic.title}>
             <button
-              key={classic.title}
+              type="button"
               onClick={() => onSelectClassic(classic)}
-              className="group flex items-center justify-between gap-3 rounded-xl border border-white/[0.05] bg-white/[0.02] px-4 py-3 text-left text-sm transition-all duration-300 hover:border-gold-500/25 hover:bg-gold-500/[0.06]"
+              className="group flex w-full items-center gap-3 rounded-tile border border-line-hairline bg-surface-2 p-2.5 text-left transition-colors duration-base ease-standard hover:border-line-accent hover:bg-surface-3 sm:flex-col sm:items-stretch sm:p-3"
             >
-              <span className="text-cinema-200">
-                <span className="text-cinema-400">{classic.author}</span>
-                <span className="mx-2 text-cinema-600">·</span>
-                <span className="font-serif italic text-cinema-100">{classic.title}</span>
+              <span
+                aria-hidden="true"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-control border border-line-strong bg-surface-3 text-gold-300 sm:hidden"
+              >
+                <Icon name="book" size={18} />
               </span>
-              <Icon name="chevronRight" size={14} className="shrink-0 text-gold-500/70 transition-transform group-hover:translate-x-0.5" />
+              <CoverArt
+                src={null}
+                title={classic.title}
+                size="sm"
+                className="hidden aspect-cover w-full rounded-control shadow-e-1 transition-transform duration-enter ease-out-expo group-hover:-translate-y-0.5 sm:block"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-serif text-body font-medium text-ink-primary">{classic.title}</span>
+                <span className="block truncate text-caption text-ink-tertiary">{classic.author}</span>
+              </span>
+              <Icon
+                name="chevronRight"
+                size={16}
+                className="shrink-0 text-gold-400 transition-transform group-hover:translate-x-0.5 sm:hidden"
+              />
             </button>
-          ))}
-        </div>
-        <div className="mt-8">
-          <Button variant="primary" onClick={onAddBook}>
-            <Icon name="plus" size={16} />
-            Add your own
-          </Button>
-        </div>
-      </div>
-    </div>
+          </li>
+        ))}
+      </ul>
+    </EmptyState>
   );
 }

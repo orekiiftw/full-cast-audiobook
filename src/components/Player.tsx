@@ -15,7 +15,11 @@ import {
   type PlayerTransportControls,
   type SegmentPlayback,
 } from "./player";
+import { audioUrl } from "../lib/audioUrl";
+import { formatDurationWithHours } from "../lib/format";
 import type { Book, Chapter, Segment } from "../types/api";
+
+const SEEK_STEP_SECONDS = 10;
 
 interface PlayerProps {
   book: Book;
@@ -102,10 +106,10 @@ export function Player({
         segmentPlayback.togglePlayPause();
       } else if (event.code === "ArrowRight") {
         event.preventDefault();
-        segmentPlayback.seekBy(10);
+        segmentPlayback.seekBy(SEEK_STEP_SECONDS);
       } else if (event.code === "ArrowLeft") {
         event.preventDefault();
-        segmentPlayback.seekBy(-10);
+        segmentPlayback.seekBy(-SEEK_STEP_SECONDS);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -136,22 +140,39 @@ export function Player({
   const progressPercent = playbackProgressPercent(position.positionMs, totalDurationMs);
   const bufferPercent = voicedSharePercent(segmentsList);
 
+  const coverSrc = book.coverR2Key ? audioUrl(book.coverR2Key) : null;
+  const scrubber = (
+    <ProgressBar
+      progress={progressPercent}
+      buffered={bufferPercent}
+      onSeek={segmentPlayback.seekToRatio}
+      onStep={(direction) => segmentPlayback.seekBy(direction * SEEK_STEP_SECONDS)}
+      label="Seek within chapter"
+      valueText={`${formatDurationWithHours(position.positionMs)} of ${formatDurationWithHours(totalDurationMs)}`}
+      formatPreview={(ratio) => formatDurationWithHours(ratio * totalDurationMs)}
+    />
+  );
+
   return (
-    <div
-      className={`player-sheet fixed bottom-0 left-0 right-0 z-50 shadow-player glass-strong transition-all duration-500 ease-out-expo ${
-        isExpanded ? "player-sheet--expanded rounded-t-[1.75rem]" : ""
+    <section
+      aria-label="Audio player"
+      data-expanded={isExpanded}
+      className={`player-dock chrome-glass fixed inset-x-0 bottom-0 z-dock border-t border-line-strong shadow-e-dock ${
+        isExpanded ? "rounded-t-stage bg-surface-1" : ""
       }`}
     >
-      <div className="absolute top-0 left-0 right-0 px-4 sm:px-6 -translate-y-1/2">
-        <div className="max-w-6xl mx-auto">
-          <ProgressBar progress={progressPercent} buffered={bufferPercent} onSeek={segmentPlayback.seekToRatio} />
+      {!isExpanded && (
+        <div className="absolute inset-x-0 top-0 -translate-y-1/2 px-4 sm:px-6">
+          <div className="mx-auto max-w-6xl">{scrubber}</div>
         </div>
-      </div>
+      )}
 
       {isExpanded ? (
         <PlayerExpandedPanel
           bookTitle={book.title}
           chapterTitle={chapter.title}
+          coverSrc={coverSrc}
+          scrubber={scrubber}
           isBufferingNext={segmentPlayback.isBufferingNext}
           segmentsList={segmentsList}
           currentSegmentIndex={currentSegmentIndex}
@@ -171,6 +192,7 @@ export function Player({
         <PlayerCollapsedBar
           bookTitle={book.title}
           chapterTitle={chapter.title}
+          coverSrc={coverSrc}
           isPlayingUi={isPlaying && !segmentPlayback.isBufferingNext}
           isBufferingNext={segmentPlayback.isBufferingNext}
           positionMs={position.positionMs}
@@ -188,6 +210,6 @@ export function Player({
         onClose={regeneration.close}
         onSubmit={regeneration.submit}
       />
-    </div>
+    </section>
   );
 }

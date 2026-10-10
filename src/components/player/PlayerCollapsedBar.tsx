@@ -1,10 +1,11 @@
-import { Icon } from "../ui";
+import { CoverArt, IconButton, LevelMeter, Spinner } from "../ui";
 import { formatDurationWithHours } from "../../lib/format";
 import { TransportControls, type PlayerTransportControls } from "./TransportControls";
 
 interface PlayerCollapsedBarProps {
   bookTitle: string;
   chapterTitle: string;
+  coverSrc?: string | null;
   isPlayingUi: boolean;
   isBufferingNext: boolean;
   positionMs: number;
@@ -16,6 +17,7 @@ interface PlayerCollapsedBarProps {
 export function PlayerCollapsedBar({
   bookTitle,
   chapterTitle,
+  coverSrc = null,
   isPlayingUi,
   isBufferingNext,
   positionMs,
@@ -24,39 +26,48 @@ export function PlayerCollapsedBar({
   transport,
 }: PlayerCollapsedBarProps) {
   return (
-    <div className="max-w-6xl mx-auto px-5 sm:px-6 h-full flex items-center justify-between gap-4">
-      <button className="flex items-center gap-3.5 min-w-0 text-left group flex-1" onClick={onExpand}>
-        <div className="min-w-0">
-          <span className="text-[10px] text-gold-400/90 uppercase tracking-[0.18em] truncate flex items-center gap-2 font-medium">
-            {bookTitle}
-            <span className={`eq text-gold-400 ${isPlayingUi ? "" : "eq-paused"}`} aria-hidden="true">
-              <span />
-              <span />
-              <span />
-            </span>
+    <div className="mx-auto flex h-full max-w-6xl items-center gap-3 px-4 sm:gap-6 sm:px-6">
+      <button
+        type="button"
+        onClick={onExpand}
+        aria-expanded={false}
+        className="group flex min-w-0 flex-1 items-center gap-3 rounded-tile py-1 pr-2 text-left"
+      >
+        <CoverArt
+          src={coverSrc}
+          title={bookTitle}
+          size="xs"
+          className="aspect-cover w-9 shrink-0 rounded-md shadow-e-1 transition-transform duration-base ease-out-expo group-hover:-translate-y-0.5"
+        />
+        <span className="min-w-0">
+          <span className="flex min-w-0 items-center gap-2">
+            <LevelMeter bars={3} active={isPlayingUi} className="h-2.5 shrink-0 text-gold-400" />
+            <span className="eyebrow truncate text-gold-400">{bookTitle}</span>
           </span>
-          <span className="font-serif text-[15px] font-medium block text-white truncate mt-0.5">{chapterTitle}</span>
-        </div>
-        <Icon name="chevronUp" size={16} className="text-cinema-500 shrink-0 transition-transform group-hover:-translate-y-0.5" />
+          <span className="mt-0.5 block truncate font-serif text-body-lg font-medium text-ink-primary">{chapterTitle}</span>
+        </span>
+        <span className="sr-only">, open the full player</span>
       </button>
 
-      <div className="flex items-center gap-4 sm:gap-5">
-        {isBufferingNext && (
-          <span className="text-[11px] text-gold-400 animate-pulse-soft hidden md:flex items-center gap-1.5 tracking-wide">
-            <span className="w-1.5 h-1.5 rounded-full bg-gold-400 animate-ping" />
-            Next line…
+      {isBufferingNext && (
+        <span className="hidden shrink-0 items-center gap-1.5 text-caption text-gold-300 lg:flex" role="status">
+          <Spinner size={12} />
+          Next line…
+        </span>
+      )}
+
+      <TransportControls variant="collapsed" {...transport} />
+
+      <div className="hidden flex-1 items-center justify-end gap-3 sm:flex">
+        <span className="font-mono text-caption tabular-nums text-ink-tertiary">
+          <span className="text-ink-secondary">{formatDurationWithHours(positionMs)}</span>
+          <span aria-hidden="true" className="mx-1">
+            /
           </span>
-        )}
-
-        <TransportControls variant="collapsed" {...transport} />
-      </div>
-
-      <div className="hidden sm:flex items-center justify-end gap-4 flex-1">
-        <span className="text-[11px] font-mono text-cinema-400 tabular-nums">
-          {formatDurationWithHours(positionMs)}
-          <span className="text-cinema-600 mx-1">/</span>
+          <span className="sr-only"> of </span>
           {formatDurationWithHours(totalDurationMs)}
         </span>
+        <IconButton icon="chevronUp" label="Expand player" size="sm" onClick={onExpand} aria-expanded={false} />
       </div>
     </div>
   );

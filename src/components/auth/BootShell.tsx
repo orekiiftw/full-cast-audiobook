@@ -1,35 +1,35 @@
-import { BrandLogo } from "../ui";
+import { AppBar, BrandLogo, Skeleton } from "../ui";
+import { LibraryHeader } from "../library/LibraryHeader";
+import { LibrarySkeleton } from "../library/LibrarySkeleton";
+import { LIBRARY_PAGE_CLASS } from "../library/layout";
+
+const noop = () => {};
 
 export function BootShell() {
   return (
-    <div
-      className="min-h-screen text-cinema-100 flex flex-col font-sans grainy"
-      aria-busy="true"
-      aria-label="Restoring your Narratea session"
-    >
-      <header className="app-header sticky top-0 z-40 border-b border-white/[0.04]">
-        <div className="max-w-6xl mx-auto px-5 sm:px-6 h-16 flex justify-between items-center gap-4">
+    <div className="relative flex min-h-screen flex-col bg-surface-0 text-ink-primary" aria-busy="true">
+      <AppBar>
+        <span className="-ml-1 p-1">
           <BrandLogo />
+        </span>
+        <div className="flex items-center gap-3" aria-hidden="true">
+          <Skeleton className="hidden h-8 w-32 rounded-full md:block" />
+          <Skeleton className="h-11 w-24 rounded-full sm:w-72" />
         </div>
-      </header>
-      <main className="flex-1 relative z-10 pb-16">
-        <div className="max-w-6xl mx-auto px-5 sm:px-6 py-12 sm:py-16">
-          <div className="mb-14 space-y-4">
-            <div className="h-3 w-24 rounded-md bg-white/[0.05]" />
-            <div className="h-10 w-48 rounded-md bg-white/[0.06]" />
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-x-5 gap-y-10">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex flex-col gap-3">
-                <div className="aspect-[2/3] rounded-2xl bg-cinema-900 shimmer" />
-                <div className="h-4 w-3/4 rounded-md bg-white/[0.05]" />
-                <div className="h-3 w-1/2 rounded-md bg-white/[0.04]" />
-              </div>
-            ))}
-          </div>
+      </AppBar>
+      <div aria-hidden="true" className="h-px w-full overflow-hidden">
+        <div className="h-px w-full origin-left animate-boot-sweep bg-gold-400/60" />
+      </div>
+
+      <main className="relative flex-1 pb-20">
+        <div className={LIBRARY_PAGE_CLASS}>
+          <LibraryHeader onAddBook={noop} disabled />
+          <LibrarySkeleton />
         </div>
       </main>
-      <span className="sr-only">Loading</span>
+      <span className="sr-only" role="status">
+        Restoring your Narratea session…
+      </span>
     </div>
   );
 }
