@@ -1,4 +1,4 @@
-import type { BookBlock } from "../epub";
+import { countWords, splitByWordCount, type BookBlock } from "../epub";
 import { SEGMENT } from "../lib/constants";
 
 export interface SegmentInfo {
@@ -87,7 +87,8 @@ function appendBlockSentences(run: SegmentRun, block: BookBlock, text: string): 
 }
 
 function needsBreakBefore(run: SegmentRun, sentenceWords: number, isShortDialogue: boolean): boolean {
-  if (isShortDialogue || !endsSentence(run.bufferedParts)) return false;
+  if (!endsSentence(run.bufferedParts)) return run.bufferedWords + sentenceWords > SEGMENT.HARD_MAX_WORDS;
+  if (isShortDialogue) return false;
 
   const { minWords, maxWords } = limitsFor(run);
   return run.bufferedWords + sentenceWords > maxWords && run.bufferedWords >= minWords;
@@ -184,22 +185,7 @@ function packClauses(clauseParts: string[], maxWords: number): string[] {
   return packed;
 }
 
-function splitByWordCount(text: string, maxWords: number): string[] {
-  const words = text.trim().split(/\s+/).filter(Boolean);
-  if (words.length <= maxWords) return [text.trim()];
-
-  const chunks: string[] = [];
-  for (let start = 0; start < words.length; start += maxWords) {
-    chunks.push(words.slice(start, start + maxWords).join(" "));
-  }
-  return chunks;
-}
-
 function endsSentence(parts: string[]): boolean {
   const last = parts[parts.length - 1];
   return !last || /[.!?।॥…]["'”’»)\]]*$/.test(last.trim());
-}
-
-function countWords(text: string): number {
-  return text.trim().split(/\s+/).filter(Boolean).length;
 }

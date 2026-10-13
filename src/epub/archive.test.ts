@@ -1,6 +1,14 @@
 import { expect, test } from "bun:test";
 import * as fflate from "fflate";
-import { validateZipDecompressedSize } from "./archive";
+import { findArchiveEntry, validateZipDecompressedSize } from "./archive";
+
+test("findArchiveEntry returns only entries stored in the archive, never inherited object properties", () => {
+  const entries = fflate.unzipSync(fflate.zipSync({ "OEBPS/ch1.xhtml": fflate.strToU8("chapter") }));
+  expect(findArchiveEntry(entries, "./OEBPS/ch1.xhtml")).toEqual(fflate.strToU8("chapter"));
+  for (const entryPath of ["constructor", "__proto__", "toString", "./hasOwnProperty"]) {
+    expect(findArchiveEntry(entries, entryPath)).toBeNull();
+  }
+});
 
 test("validateZipDecompressedSize accepts valid archive within limit", () => {
   const zipBytes = fflate.zipSync({

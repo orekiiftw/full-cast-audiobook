@@ -13,6 +13,36 @@ describe("isFrontBackMatterPath", () => {
     expect(isFrontBackMatterPath("OEBPS/descent.xhtml")).toBe(false);
     expect(isFrontBackMatterPath("OEBPS/chapter1.xhtml")).toBe(false);
   });
+
+  it("matches files named only for a section, ignoring numbering, case, and separators", () => {
+    for (const filePath of [
+      "OEBPS/cover.xhtml",
+      "OEBPS/9780062_Cover.xhtml",
+      "OEBPS/titlepage.xhtml",
+      "OEBPS/title_page.xhtml",
+      "OEBPS/contents.xhtml",
+      "OEBPS/05_about-the-author.xhtml",
+      "OEBPS/AboutTheAuthors.xhtml",
+      "OEBPS/sample_chapter.xhtml",
+    ]) {
+      expect(isFrontBackMatterPath(filePath)).toBe(true);
+    }
+  });
+
+  it("keeps chapters whose file names contain a section word alongside other words", () => {
+    for (const filePath of [
+      "OEBPS/index_split_000.html",
+      "OEBPS/index.html",
+      "OEBPS/01_The_Half-Blood_Prince.xhtml",
+      "OEBPS/07_Under_Cover.xhtml",
+      "OEBPS/09_Title_Fight.xhtml",
+      "OEBPS/11_Contents_of_the_Heart.xhtml",
+      "OEBPS/12_The_Author.xhtml",
+      "OEBPS/14_The_Blood_Sample.xhtml",
+    ]) {
+      expect(isFrontBackMatterPath(filePath)).toBe(false);
+    }
+  });
 });
 
 describe("isTocEntryLine", () => {

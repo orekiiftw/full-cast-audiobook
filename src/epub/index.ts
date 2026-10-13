@@ -7,6 +7,7 @@ import { PIPELINE } from "../lib/constants";
 
 export type { BookBlock } from "./blocks";
 export type { ParsedBook } from "./chapters";
+export { countWords, splitByWordCount } from "./text";
 
 export function parseEpub(buffer: Buffer): ParsedBook {
   const entries = openEpubArchive(buffer);

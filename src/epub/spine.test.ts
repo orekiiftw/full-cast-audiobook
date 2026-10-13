@@ -14,4 +14,14 @@ describe("spine reading", () => {
     const parsed = parseEpub(createMockEpub({}));
     expect(parsed.chapters[0].title).toContain("Chapter 1");
   });
+
+  it("reads chapters stored under Calibre's default index_split file names", () => {
+    const parsed = parseEpub(createMockEpub({ chapterFileNames: ["index_split_000.html", "index_split_001.html"] }));
+    expect(parsed.chapters.map((chapter) => chapter.title)).toEqual(["Chapter 1: The Departure", "Chapter 2: The Whispering Woods"]);
+  });
+
+  it("skips spine items that resolve to Object.prototype keys at the archive root instead of failing the book", () => {
+    const parsed = parseEpub(createMockEpub({ missingSpineHrefs: ["../constructor", "../__proto__", "../toString"] }));
+    expect(parsed.chapters.map((chapter) => chapter.title)).toEqual(["Chapter 1: The Departure", "Chapter 2: The Whispering Woods"]);
+  });
 });

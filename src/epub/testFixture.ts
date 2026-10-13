@@ -39,6 +39,8 @@ interface MockEpubOptions {
   emptySpine?: boolean;
   paginatedPages?: number;
   metadataStyle?: "dc" | "meta-name" | "prefixed" | "none";
+  chapterFileNames?: [string, string];
+  missingSpineHrefs?: string[];
 }
 
 export function createMockEpub(options: MockEpubOptions): Buffer {
@@ -54,7 +56,14 @@ export function createMockEpub(options: MockEpubOptions): Buffer {
   for (const document of documents) {
     files[`OEBPS/${document.name}`] = strToU8(htmlDocument(document));
   }
-  files["OEBPS/content.opf"] = strToU8(packageDocument(buildMetadataBlock(options), documents));
+  const missingDocuments = (options.missingSpineHrefs ?? []).map((href, index) => ({
+    id: `missing${index}`,
+    name: href,
+    title: "",
+    body: "",
+    inSpine: true,
+  }));
+  files["OEBPS/content.opf"] = strToU8(packageDocument(buildMetadataBlock(options), [...documents, ...missingDocuments]));
 
   return Buffer.from(zipSync(files));
 }
@@ -69,9 +78,10 @@ interface MockDocument {
 
 function chapterDocuments(options: MockEpubOptions): MockDocument[] {
   const spineItems = !options.emptySpine;
+  const [chapter1Name, chapter2Name] = options.chapterFileNames ?? ["ch1.xhtml", "ch2.xhtml"];
   return [
-    { id: "ch1", name: "ch1.xhtml", title: "Chapter 1", body: options.chapter1Content ?? DEFAULT_CHAPTER_ONE, inSpine: spineItems },
-    { id: "ch2", name: "ch2.xhtml", title: "Chapter 2", body: options.chapter2Content ?? DEFAULT_CHAPTER_TWO, inSpine: spineItems },
+    { id: "ch1", name: chapter1Name, title: "Chapter 1", body: options.chapter1Content ?? DEFAULT_CHAPTER_ONE, inSpine: spineItems },
+    { id: "ch2", name: chapter2Name, title: "Chapter 2", body: options.chapter2Content ?? DEFAULT_CHAPTER_TWO, inSpine: spineItems },
   ];
 }
 

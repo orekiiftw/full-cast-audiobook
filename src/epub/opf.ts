@@ -15,7 +15,7 @@ export function resolvePackagePath(entries: ArchiveEntries): string {
   }
 
   const containerContent = readArchiveEntryText(entries, CONTAINER_PATH, EPUB_LIMITS.MAX_CONTAINER_BYTES, "container.xml");
-  const rootfileTag = containerContent.match(/<rootfile\b[^>]*>/i)?.[0] ?? "";
+  const rootfileTag = findOpeningTag(containerContent, "rootfile\\b")?.tag ?? "";
   const rootfilePath = rootfileTag.match(/full-path\s*=\s*["']([^"']+)["']/i)?.[1];
   if (!rootfilePath) {
     throw new Error("Invalid container.xml: Cannot find rootfile path");
@@ -82,8 +82,7 @@ export function resolveReadingOrder(packageDocument: HTMLElement, packageDirecto
 
 function extractOpfMetadata(packageContent: string, packageDocument: HTMLElement, field: "title" | "creator"): string | undefined {
   const decode = (value: string) =>
-    value
-      .replace(/<[^>]*>/g, " ")
+    stripTags(value)
       .replace(/&nbsp;/g, " ")
       .replace(/&amp;/g, "&")
       .replace(/&#39;|&apos;/g, "'")
@@ -95,13 +94,12 @@ function extractOpfMetadata(packageContent: string, packageDocument: HTMLElement
     return decoded && decoded.toLowerCase() !== "unknown" ? decoded : undefined;
   };
 
-  const elementPattern = new RegExp(`<([a-zA-Z0-9_-]+:)?${field}\\b[^>]*>([\\s\\S]*?)</([a-zA-Z0-9_-]+:)?${field}>`, "i");
-  const elementValue = clean(packageContent.match(elementPattern)?.[2]);
+  const elementValue = clean(readElementContent(packageContent, field));
   if (elementValue) return elementValue;
 
   for (const name of field === "title" ? ["title"] : ["creator", "author"]) {
-    const tagPattern = new RegExp(`<meta[^>]*\\b(?:name|property)\\s*=\\s*["'][^"']*${name}["'][^>]*>`, "i");
-    const tag = packageContent.match(tagPattern)?.[0];
+    const nameAttribute = new RegExp(`\\b(?:name|property)\\s*=\\s*["'][^"']*${name}["']`, "i");
+    const tag = findOpeningTag(packageContent, "meta", (candidate) => nameAttribute.test(candidate))?.tag;
     if (tag) {
       const content = tag.match(/\bcontent\s*=\s*["']([^"']*)["']/i)?.[1];
       const inline = tag.match(/>([^<]+)</)?.[1];
@@ -112,6 +110,46 @@ function extractOpfMetadata(packageContent: string, packageDocument: HTMLElement
 
   const node = packageDocument.querySelector(`dc\\:${field}`) ?? packageDocument.querySelector(field);
   return clean(node?.text);
+}
+
+function readElementContent(packageContent: string, field: string): string | undefined {
+  const openTag = findOpeningTag(packageContent, `(?:[a-zA-Z0-9_-]+:)?${field}\\b`);
+  if (!openTag) return undefined;
+
+  const closeTag = new RegExp(`</(?:[a-zA-Z0-9_-]+:)?${field}>`, "gi");
+  closeTag.lastIndex = openTag.end;
+  const closeMatch = closeTag.exec(packageContent);
+  return closeMatch ? packageContent.slice(openTag.end, closeMatch.index) : undefined;
+}
+
+interface OpeningTag {
+  tag: string;
+  end: number;
+}
+
+function findOpeningTag(content: string, namePattern: string, accepts: (tag: string) => boolean = () => true): OpeningTag | undefined {
+  const tagStart = new RegExp(`<${namePattern}`, "gi");
+  for (let match = tagStart.exec(content); match; match = tagStart.exec(content)) {
+    const end = content.indexOf(">", tagStart.lastIndex) + 1;
+    if (end === 0) return undefined;
+
+    const tag = content.slice(match.index, end);
+    if (accepts(tag)) return { tag, end };
+    tagStart.lastIndex = end;
+  }
+  return undefined;
+}
+
+function stripTags(value: string): string {
+  let text = "";
+  let index = 0;
+  for (let open = value.indexOf("<"); open !== -1; open = value.indexOf("<", index)) {
+    const close = value.indexOf(">", open);
+    if (close === -1) break;
+    text += `${value.slice(index, open)} `;
+    index = close + 1;
+  }
+  return text + value.slice(index);
 }
 
 function buildManifestPaths(packageDocument: HTMLElement, packageDirectory: string): Map<string, string> {

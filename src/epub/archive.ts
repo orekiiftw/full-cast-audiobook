@@ -23,8 +23,10 @@ export function openEpubArchive(buffer: Buffer): ArchiveEntries {
 }
 
 export function findArchiveEntry(entries: ArchiveEntries, entryPath: string): Uint8Array | null {
-  if (entries[entryPath]) return entries[entryPath];
-  return entries[entryPath.replace(/^\.\//, "")] ?? null;
+  for (const candidate of [entryPath, entryPath.replace(/^\.\//, "")]) {
+    if (Object.hasOwn(entries, candidate)) return entries[candidate];
+  }
+  return null;
 }
 
 export function readArchiveEntryText(entries: ArchiveEntries, entryPath: string, maxBytes: number, what: string): string {

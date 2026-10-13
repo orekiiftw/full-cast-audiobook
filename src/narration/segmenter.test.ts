@@ -1,7 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import { segmentChapter } from "./segmenter";
-import { BookBlock } from "../epub";
+import { BookBlock, countWords } from "../epub";
 import { SEGMENT } from "../lib/constants";
+
+const CHINESE_PARAGRAPH =
+  "清晨的薄雾笼罩着整个村庄，远处传来的钟声在山谷之间回荡，仿佛在提醒人们新的一天已经开始。老李坐在自家门前的石阶上，望着远方的群山发呆，心里一直在想着昨天夜里发生的那件怪事。";
+
+const THAI_PARAGRAPH =
+  "หมอกยามเช้าปกคลุมหมู่บ้านทั้งหมด เสียงระฆังที่ดังมาจากที่ไกลสะท้อนไปมาระหว่างหุบเขา ชายชราคนนั้นนั่งอยู่บนบันไดหินหน้าบ้านของตัวเอง มองดูภูเขาที่อยู่ไกลออกไปอย่างเหม่อลอย";
 
 describe("segmentChapter", () => {
   it("chunks standard narration blocks into segments", () => {
@@ -131,6 +137,30 @@ describe("segmentChapter", () => {
     expect(segments.length).toBeGreaterThan(1);
     for (const segment of segments) {
       expect(/[.!?।॥]$/.test(segment.text.trim())).toBe(true);
+    }
+  });
+
+  it("keeps Chinese and Thai prose written without spaces between words under HARD_MAX_WORDS", () => {
+    for (const paragraph of [CHINESE_PARAGRAPH, THAI_PARAGRAPH]) {
+      const blocks: BookBlock[] = Array.from({ length: 30 }, () => ({ type: "narration", text: paragraph }));
+
+      const segments = segmentChapter(blocks);
+      expect(segments.length).toBeGreaterThan(1);
+      for (const segment of segments) {
+        expect(countWords(segment.text)).toBeLessThanOrEqual(SEGMENT.HARD_MAX_WORDS);
+      }
+      expect(segments.map((segment) => segment.text).join(" ")).toBe(blocks.map((block) => block.text).join(" "));
+    }
+  });
+
+  it("caps a run of blocks that never reaches a sentence end at HARD_MAX_WORDS", () => {
+    const line = "the river runs beneath the hill and carries all our sorrows home";
+    const blocks: BookBlock[] = Array.from({ length: 60 }, () => ({ type: "narration", text: line }));
+
+    const segments = segmentChapter(blocks);
+    expect(segments.length).toBeGreaterThan(1);
+    for (const segment of segments) {
+      expect(segment.text.split(/\s+/).length).toBeLessThanOrEqual(SEGMENT.HARD_MAX_WORDS);
     }
   });
 });

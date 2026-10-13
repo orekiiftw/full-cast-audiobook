@@ -8,42 +8,52 @@ const FRONT_BACK_MATTER_TOKENS = new Set([
   "toc",
   "ncx",
   "cx",
-  "contents",
   "nav",
-  "cover",
-  "index",
   "biblio",
-  "references",
-  "about",
-  "author",
   "ack",
   "acks",
   "advert",
   "adverts",
-  "summary",
   "synopsis",
   "preface",
   "foreword",
   "epigraph",
-  "praise",
   "imprint",
   "glossary",
   "appendix",
   "endnotes",
   "footnotes",
   "chronology",
-  "intro",
   "desc",
   "blurb",
   "teaser",
-  "half",
-  "title",
   "excerpt",
+]);
+
+const FRONT_BACK_MATTER_NAMES = new Set([
+  "about",
+  "aboutauthor",
+  "abouttheauthor",
+  "abouttheauthors",
+  "aboutthepublisher",
+  "author",
+  "authorbio",
+  "contents",
+  "cover",
+  "intro",
+  "praise",
+  "references",
   "sample",
+  "samplechapter",
+  "summary",
+  "title",
+  "titlepage",
 ]);
 
 const FRONT_BACK_STEM_RE =
   /^(?:copy\d+|title\d+|map\d+|half[-_]?title|front[-_]?matter|frontmatter|table[-_]?of[-_]?contents|acknowledg|dedicat|synops|glossar|chronolog|illustrat|appendices|bibliograph)/;
+
+const STEM_NUMBERING_RE = /^[\d\W_]+|[\d\W_]+$/g;
 
 export const FRONT_MATTER_TITLE_RE =
   /^\s*(synopsis|contents|table of contents|list of (chapters|illustrations)|index|preface|foreword|introduction|dedication|epigraph|acknowledg|about the (author|publisher|book|novel|story|edition)|about this (book|edition|novel|story)|also by|by the same author|praise\b|reviews?|editorial review|description|blurb|publisher'?s note|author'?s note|a note\b|note from|note on the text|copyright|illustrations|chronology|a chronology|the editor|half title|reader'?s guide|cast of characters|dramatis personae|preview|excerpt|sample)\b/i;
@@ -115,6 +125,7 @@ const TOC_LEADING_FILLER_MAX_WORDS = 6;
 export function isFrontBackMatterPath(filePath: string): boolean {
   const stem = (filePath.split("/").pop() ?? filePath).replace(/\.[a-z0-9]+$/i, "").toLowerCase();
   if (FRONT_BACK_STEM_RE.test(stem)) return true;
+  if (FRONT_BACK_MATTER_NAMES.has(stem.replace(STEM_NUMBERING_RE, "").replace(/[^a-z0-9]+/g, ""))) return true;
   return stem.split(/[^a-z0-9]+/).some((part) => FRONT_BACK_MATTER_TOKENS.has(part));
 }
 
