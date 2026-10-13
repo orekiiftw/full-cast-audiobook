@@ -6,11 +6,15 @@ import { enqueueSegmentJobs, segmentJobId, segmentQueue, type SegmentJobData } f
 
 const LOOKAHEAD_THROTTLE_MS = 2_000;
 
-const MAX_THROTTLE_KEYS = 5_000;
+const MAX_THROTTLED_BOOKS = 5_000;
 
 const PRIORITY_LIFT_BATCH_SIZE = 64;
 
-const lookaheadThrottle = createWindowThrottle(LOOKAHEAD_THROTTLE_MS);
+const lookaheadThrottle = createBookThrottle(LOOKAHEAD_THROTTLE_MS, MAX_THROTTLED_BOOKS, (bookId, anchor) => {
+  evaluateWindow(bookId, anchor).catch((err) =>
+    console.error(`Deferred lookahead failed for book ${bookId} ch ${anchor.chapterIndex} seg ${anchor.segmentIndex}:`, err),
+  );
+});
 
 interface LookaheadAnchor {
   chapterIndex: number;
@@ -20,15 +24,17 @@ interface LookaheadAnchor {
 const BOOK_START: LookaheadAnchor = { chapterIndex: 1, segmentIndex: 1 };
 
 export async function ensureLookahead(bookId: string, anchor: LookaheadAnchor = BOOK_START): Promise<void> {
-  const throttleKey = `${bookId}:${anchor.chapterIndex}:${anchor.segmentIndex}`;
-  if (!lookaheadThrottle.shouldEvaluate(throttleKey)) return;
+  if (!lookaheadThrottle.admit(bookId, anchor)) return;
+  await evaluateWindow(bookId, anchor);
+}
 
+async function evaluateWindow(bookId: string, anchor: LookaheadAnchor): Promise<void> {
   try {
     const windowRows = await loadLookaheadWindow(bookId, anchor);
     await liftJobPriorities(queuedIds(windowRows), PIPELINE.LOOKAHEAD_PRIORITY);
     await promotePendingSegments(windowRows, bookId);
   } catch (err) {
-    lookaheadThrottle.release(throttleKey);
+    lookaheadThrottle.release(bookId);
     throw err;
   }
 }
@@ -89,26 +95,83 @@ function pendingSegmentIds(windowRows: LookaheadWindowRow[]): string[] {
   return windowRows.filter((row) => row.status === "pending").map((row) => row.segmentId);
 }
 
-interface WindowThrottle {
-  shouldEvaluate(throttleKey: string): boolean;
-  release(throttleKey: string): void;
+interface BookThrottle {
+  admit(bookId: string, anchor: LookaheadAnchor): boolean;
+  release(bookId: string): void;
 }
 
-function createWindowThrottle(throttleMs: number): WindowThrottle {
-  const lastEvaluatedAt = new Map<string, number>();
+interface ThrottledBook {
+  evaluatedAt: number;
+  anchor: LookaheadAnchor;
+  deferred?: LookaheadAnchor;
+  timer?: ReturnType<typeof setTimeout>;
+}
+
+// Keyed by book alone, so varying the anchor cannot multiply evaluations. A moved anchor that lands
+// inside the window is held and evaluated once the window closes (latest anchor wins), so it is
+// delayed but never lost. The map stays ordered by last evaluation: expired books are pruned from
+// the front, and a full map evicts its least recently evaluated book instead of resetting them all.
+function createBookThrottle(
+  throttleMs: number,
+  maxBooks: number,
+  evaluateDeferred: (bookId: string, anchor: LookaheadAnchor) => void,
+): BookThrottle {
+  const books = new Map<string, ThrottledBook>();
+
+  // A wall clock that steps backwards counts as expired, rather than holding the book until it catches up.
+  function remainingMs(entry: ThrottledBook, now: number): number {
+    const elapsed = now - entry.evaluatedAt;
+    return elapsed < 0 || elapsed >= throttleMs ? 0 : throttleMs - elapsed;
+  }
+
+  function stamp(bookId: string, anchor: LookaheadAnchor, now: number): void {
+    const previous = books.get(bookId);
+    if (previous?.timer) clearTimeout(previous.timer);
+    books.delete(bookId);
+    books.set(bookId, { evaluatedAt: now, anchor });
+    for (const [oldestId, oldest] of books) {
+      const idle = !oldest.timer && remainingMs(oldest, now) === 0;
+      if (!idle && books.size <= maxBooks) break;
+      if (oldest.timer) clearTimeout(oldest.timer);
+      books.delete(oldestId);
+    }
+  }
+
+  function flushDeferred(bookId: string): void {
+    const entry = books.get(bookId);
+    if (!entry) return;
+    entry.timer = undefined;
+    const anchor = entry.deferred;
+    if (!anchor) return;
+    stamp(bookId, anchor, Date.now());
+    evaluateDeferred(bookId, anchor);
+  }
 
   return {
-    shouldEvaluate(throttleKey: string): boolean {
+    admit(bookId: string, anchor: LookaheadAnchor): boolean {
       const now = Date.now();
-      if (now - (lastEvaluatedAt.get(throttleKey) ?? 0) < throttleMs) return false;
-      lastEvaluatedAt.set(throttleKey, now);
-      if (lastEvaluatedAt.size > MAX_THROTTLE_KEYS) lastEvaluatedAt.clear();
-      return true;
+      const entry = books.get(bookId);
+      const waitMs = entry ? remainingMs(entry, now) : 0;
+      if (!entry || waitMs === 0) {
+        stamp(bookId, anchor, now);
+        return true;
+      }
+      entry.deferred = sameAnchor(anchor, entry.anchor) ? undefined : anchor;
+      if (entry.deferred && !entry.timer) {
+        entry.timer = setTimeout(() => flushDeferred(bookId), waitMs);
+        entry.timer.unref?.();
+      }
+      return false;
     },
-    release(throttleKey: string): void {
-      lastEvaluatedAt.delete(throttleKey);
+    release(bookId: string): void {
+      const entry = books.get(bookId);
+      if (entry) entry.evaluatedAt = Number.NEGATIVE_INFINITY;
     },
   };
+}
+
+function sameAnchor(left: LookaheadAnchor, right: LookaheadAnchor): boolean {
+  return left.chapterIndex === right.chapterIndex && left.segmentIndex === right.segmentIndex;
 }
 
 async function enqueueFromWindow(windowRows: LookaheadWindowRow[], promoted: Array<{ id: string }>, bookId: string): Promise<void> {

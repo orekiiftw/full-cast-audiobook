@@ -17,7 +17,9 @@ export async function runSegmentJob(job: Job<SegmentJobData>): Promise<void> {
   const { bookId, chapterId, segmentId } = job.data;
 
   try {
-    if (job.attemptsMade > 0) {
+    // A stalled job re-runs with attemptsMade unchanged, so only attemptsStarted shows that a dead execution of this
+    // job may still hold the row's claim.
+    if (job.attemptsMade > 0 || job.attemptsStarted > 1) {
       await resetClaimedSegment(segmentId);
     }
 

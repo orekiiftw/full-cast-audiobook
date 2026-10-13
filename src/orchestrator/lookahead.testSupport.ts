@@ -1,30 +1,20 @@
-import { afterAll, beforeEach, describe, expect, it, mock, setSystemTime } from "bun:test";
-import { Database } from "bun:sqlite";
+import { afterAll, beforeEach, describe, expect, it, jest, mock, setSystemTime } from "bun:test";
 import type { Job } from "bullmq";
-import { getTableConfig, type PgColumn } from "drizzle-orm/pg-core";
-import { drizzle } from "drizzle-orm/pg-proxy";
 import { books, castMembers, chapters, segments } from "../schema";
 import { PIPELINE } from "../lib/constants";
 import type { IngestionJobData, SegmentJobData } from "../queue";
+import { createPipelineDatabase } from "./testSupport";
 
 const WINDOW_SIZE = PIPELINE.LOOKAHEAD_SEGMENTS + 1;
 const CHAPTER_COUNT = 4;
 const SEGMENTS_PER_CHAPTER = WINDOW_SIZE + 2;
 const SECTION_COUNT = CHAPTER_COUNT * SEGMENTS_PER_CHAPTER;
+const THROTTLE_MS = 2_000;
 const PAST_THROTTLE_MS = 2_500;
+const THROTTLED_BOOK_CAP = 5_000;
+const WINDOW_QUERY = /^select\b[\s\S]* from "segments" inner join "chapters"/;
 
-const sqlite = new Database(":memory:");
-for (const table of [books, castMembers, chapters, segments]) {
-  const { name, columns, uniqueConstraints } = getTableConfig(table);
-  const uniques = uniqueConstraints.map((unique) => `UNIQUE (${unique.columns.map((column) => `"${column.name}"`).join(", ")})`);
-  sqlite.exec(`CREATE TABLE "${name}" (${[...columns.map(sqliteColumn), ...uniques].join(", ")})`);
-}
-
-let beforeQuery: (query: string) => void = () => {};
-const testDb = drizzle(async (query, params) => {
-  beforeQuery(query);
-  return { rows: sqlite.query(toSqliteDialect(query)).values(...params) };
-});
+const { sqlite, db: testDb, hooks } = createPipelineDatabase([books, castMembers, chapters, segments]);
 mock.module("../db", () => ({ db: testDb }));
 
 const enqueued: Array<SegmentJobData & { priority?: number }> = [];
@@ -41,6 +31,8 @@ mock.module("../queue", () => ({
   removeBookJobs: async () => {},
   emitProgressEvent: () => {},
   invalidateBookVoiceContextClusterwide: () => {},
+  acquireLock: async () => "lock-token",
+  releaseLock: async () => {},
   isLockHeld: async () => false,
   segmentJobId: (segmentId: string) => segmentId,
   ingestJobId: (bookId: string) => bookId,
@@ -58,6 +50,7 @@ mock.module("../queue", () => ({
     getJobCounts: async () => ({ wait: 0, active: 0, delayed: 0, prioritized: 0 }),
   },
   ingestionQueue: { getJob: async () => null },
+  stitchQueue: {},
 }));
 mock.module("../narration/voiceContext", () => ({
   getBookVoiceContext: async () => ({ narratorId: null, narratorVoice: "Mia", narratorBaseStyle: "", pDict: {} }),
@@ -115,7 +108,7 @@ beforeEach(() => {
   lifted.length = 0;
   rejectEnqueue = false;
   onGetJob = () => {};
-  beforeQuery = () => {};
+  hooks.beforeQuery = () => {};
   passThrottle();
 });
 
@@ -147,6 +140,7 @@ describe("section lookahead window", () => {
       const heard = sectionAt(anchor - 1);
       setStatus(heard.chapterIndex, heard.segmentIndex, "voiced");
       enqueued.length = 0;
+      passThrottle();
 
       await ensureLookahead(bookId, sectionAt(anchor));
 
@@ -188,6 +182,7 @@ describe("section lookahead window", () => {
 
     sqlite.query("DELETE FROM segments WHERE chapter_id = ?").run(chapterId(3));
     enqueued.length = 0;
+    passThrottle();
     await ensureLookahead(bookId, { chapterIndex: 2, segmentIndex: last });
     expect(enqueuedSections()).toEqual([
       label(2, last),
@@ -206,19 +201,66 @@ describe("section lookahead window", () => {
     expect(statusOf(3, 1)).toBe("queued");
   });
 
-  it("skips a repeated anchor for a moment but never delays a moved one", async () => {
-    await ensureLookahead(bookId, { chapterIndex: 1, segmentIndex: 1 });
-    await ensureLookahead(bookId, { chapterIndex: 1, segmentIndex: 1 });
-    expect(lifted).toHaveLength(0);
+  it("evaluates a book once per window and holds a moved anchor until the window closes, latest anchor winning", async () => {
+    const windowQueries = countWindowQueries();
+    await withFakeTimers(async () => {
+      await ensureLookahead(bookId, { chapterIndex: 1, segmentIndex: 1 });
+      enqueued.length = 0;
 
-    enqueued.length = 0;
-    await ensureLookahead(bookId, { chapterIndex: 1, segmentIndex: 2 });
-    expect(enqueuedSections()).toEqual([label(1, WINDOW_SIZE + 1)]);
+      await ensureLookahead(bookId, { chapterIndex: 1, segmentIndex: 1 });
+      expect(jest.getTimerCount()).toBe(0);
+      await ensureLookahead(bookId, { chapterIndex: 1, segmentIndex: 2 });
+      await ensureLookahead(bookId, { chapterIndex: 1, segmentIndex: 3 });
+      expect(windowQueries()).toBe(1);
+      expect(enqueued).toHaveLength(0);
+
+      jest.advanceTimersByTime(THROTTLE_MS - 1);
+      expect(jest.getTimerCount()).toBe(1);
+      jest.advanceTimersByTime(1);
+      expect(jest.getTimerCount()).toBe(0);
+    });
+    await waitFor(() => enqueued.length > 0);
+
+    expect(windowQueries()).toBe(2);
+    expect(enqueuedSections()).toEqual([label(1, WINDOW_SIZE + 1), label(1, WINDOW_SIZE + 2)]);
+    expect(lifted).toHaveLength(WINDOW_SIZE - 2);
 
     lifted.length = 0;
     passThrottle();
     await ensureLookahead(bookId, { chapterIndex: 1, segmentIndex: 1 });
     expect(lifted).toHaveLength(WINDOW_SIZE);
+  });
+
+  it("lets no run of distinct anchors bypass one book's throttle or reset another book's", async () => {
+    await ensureLookahead(bookId, { chapterIndex: 1, segmentIndex: 1 });
+    const windowQueries = countWindowQueries();
+    await withFakeTimers(async () => {
+      for (let segmentIndex = 1; segmentIndex <= THROTTLED_BOOK_CAP + 1; segmentIndex++) {
+        await ensureLookahead("scrubbing-book", { chapterIndex: 1, segmentIndex });
+      }
+      await ensureLookahead(bookId, { chapterIndex: 1, segmentIndex: 1 });
+      expect(windowQueries()).toBe(1);
+      expect(lifted).toHaveLength(0);
+
+      jest.advanceTimersByTime(THROTTLE_MS);
+    });
+    await waitFor(() => windowQueries() > 1);
+
+    expect(windowQueries()).toBe(2);
+    expect(lifted).toHaveLength(0);
+  });
+
+  it("evicts only the least recently evaluated book when the throttle is full", async () => {
+    for (let idle = 0; idle < THROTTLED_BOOK_CAP; idle++) await ensureLookahead(`idle-book-${idle}`);
+    await ensureLookahead(bookId);
+    const windowQueries = countWindowQueries();
+
+    await ensureLookahead(bookId);
+    await ensureLookahead("idle-book-1");
+    expect(windowQueries()).toBe(0);
+
+    await ensureLookahead("idle-book-0");
+    expect(windowQueries()).toBe(1);
   });
 
   it("returns promoted rows to pending when enqueueing fails and lets the same anchor retry at once", async () => {
@@ -276,7 +318,7 @@ describe("section lookahead window", () => {
   it("a lineage mismatch only resets a row it still holds", async () => {
     for (const racedStatus of ["pending", "voiced"]) {
       setStatus(3, 2, "queued");
-      beforeQuery = (query) => {
+      hooks.beforeQuery = (query) => {
         if (/^select\b[\s\S]* from "chapters"/.test(query)) setStatus(3, 2, racedStatus);
       };
 
@@ -332,27 +374,33 @@ interface Section {
   segmentIndex: number;
 }
 
-function sqliteColumn(column: PgColumn): string {
-  if (column.primary) return `"${column.name}" TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16))))`;
-  const type = column.getSQLType() === "integer" ? "INTEGER" : "TEXT";
-  if (!column.notNull || (typeof column.default !== "number" && typeof column.default !== "string")) return `"${column.name}" ${type}`;
-  // Postgres's DEFAULT keyword reaches SQLite as NULL; REPLACE turns that NULL back into the column default.
-  const fallback = typeof column.default === "string" ? `'${column.default}'` : column.default;
-  return `"${column.name}" ${type} NOT NULL ON CONFLICT REPLACE DEFAULT ${fallback}`;
-}
-
-function toSqliteDialect(query: string): string {
-  return query
-    .replace(/\$\d+/g, "?")
-    .replace(/::int\b/g, "")
-    .replace(/\bUPDATE (\w+) (\w+)\s+SET\b/g, "UPDATE $1 AS $2 SET")
-    .replace(/\(default,/g, "(lower(hex(randomblob(16))),")
-    .replace(/\bdefault\b/g, "NULL");
-}
-
 function passThrottle(): void {
   clock += PAST_THROTTLE_MS;
   setSystemTime(new Date(clock));
+}
+
+// Fake timers start from the harness clock and hand it back, so throttle stamps stay on one timeline.
+async function withFakeTimers(run: () => Promise<void>): Promise<void> {
+  jest.useFakeTimers({ now: clock });
+  try {
+    await run();
+  } finally {
+    clock = Date.now();
+    jest.useRealTimers();
+    setSystemTime(new Date(clock));
+  }
+}
+
+async function waitFor(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 200 && !condition(); attempt++) await Bun.sleep(5);
+}
+
+function countWindowQueries(): () => number {
+  let count = 0;
+  hooks.beforeQuery = (query) => {
+    if (WINDOW_QUERY.test(query)) count++;
+  };
+  return () => count;
 }
 
 function chapterId(chapterIndex: number): string {

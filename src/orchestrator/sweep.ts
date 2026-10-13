@@ -13,6 +13,7 @@ import {
   segmentQueue,
 } from "../queue";
 import { incrementFailedCount } from "./chapterCounters";
+import { bookRetryLockName } from "./lifecycle";
 import { isChapterComplete } from "../lib/chapterStatus";
 
 const LIVE_JOB_STATES = new Set(["wait", "delayed", "prioritized", "active", "waiting-children"]);
@@ -95,7 +96,9 @@ async function resolveOrphanedSegment(row: MidflightSegment): Promise<void> {
 
   if (job) await job.remove().catch(() => {});
 
-  const effectiveAttempts = row.attempts + (state === "failed" ? 1 : 0);
+  // Whatever state its job ended in (failed, completed, or already removed), the execution that claimed this row is gone
+  // and used up an attempt. Counting only failed jobs would let a segment that keeps killing its worker cycle here forever.
+  const effectiveAttempts = row.attempts + 1;
   if (effectiveAttempts >= PIPELINE.MAX_SEGMENT_ATTEMPTS) {
     await failOrphanedSegment(row, state, effectiveAttempts);
     return;
@@ -190,6 +193,9 @@ async function failStuckIngestions(): Promise<void> {
   const interrupted: Array<{ id: string }> = [];
   for (const candidate of stuckCandidates) {
     try {
+      // A retry holds its lock from before it claims the book until its ingestion job is queued.
+      if (await isLockHeld(bookRetryLockName(candidate.id))) continue;
+
       const job = await ingestionQueue.getJob(ingestJobId(candidate.id));
       const state = job ? await job.getState() : "unknown";
       if (LIVE_JOB_STATES.has(state)) continue;

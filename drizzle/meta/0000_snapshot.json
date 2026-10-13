@@ -1,7 +1,5 @@
 {
-  "id": "7fedcc48-4e39-4e0f-a5b0-59edf90eb5b5",
-  "prevId": "00000000-0000-0000-0000-000000000000",
-  "version": "6",
+  "version": "7",
   "dialect": "postgresql",
   "tables": {
     "public.books": {
@@ -66,12 +64,15 @@
       "uniqueConstraints": {
         "books_source_hash_unique": {
           "name": "books_source_hash_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "source_hash"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
-      }
+      },
+      "policies": {},
+      "isRLSEnabled": false,
+      "checkConstraints": {}
     },
     "public.cast_members": {
       "name": "cast_members",
@@ -138,28 +139,31 @@
         "cast_members_book_id_books_id_fk": {
           "name": "cast_members_book_id_books_id_fk",
           "tableFrom": "cast_members",
-          "tableTo": "books",
           "columnsFrom": [
             "book_id"
           ],
+          "tableTo": "books",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "cast_members_book_id_name_unique": {
           "name": "cast_members_book_id_name_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "book_id",
             "name"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
-      }
+      },
+      "policies": {},
+      "isRLSEnabled": false,
+      "checkConstraints": {}
     },
     "public.chapters": {
       "name": "chapters",
@@ -215,28 +219,31 @@
         "chapters_book_id_books_id_fk": {
           "name": "chapters_book_id_books_id_fk",
           "tableFrom": "chapters",
-          "tableTo": "books",
           "columnsFrom": [
             "book_id"
           ],
+          "tableTo": "books",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "chapters_book_id_chapter_index_unique": {
           "name": "chapters_book_id_chapter_index_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "book_id",
             "chapter_index"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
-      }
+      },
+      "policies": {},
+      "isRLSEnabled": false,
+      "checkConstraints": {}
     },
     "public.playback_state": {
       "name": "playback_state",
@@ -281,41 +288,44 @@
         "playback_state_book_id_books_id_fk": {
           "name": "playback_state_book_id_books_id_fk",
           "tableFrom": "playback_state",
-          "tableTo": "books",
           "columnsFrom": [
             "book_id"
           ],
+          "tableTo": "books",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "playback_state_chapter_id_chapters_id_fk": {
           "name": "playback_state_chapter_id_chapters_id_fk",
           "tableFrom": "playback_state",
-          "tableTo": "chapters",
           "columnsFrom": [
             "chapter_id"
           ],
+          "tableTo": "chapters",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "playback_state_book_id_chapter_id_unique": {
           "name": "playback_state_book_id_chapter_id_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "book_id",
             "chapter_id"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
-      }
+      },
+      "policies": {},
+      "isRLSEnabled": false,
+      "checkConstraints": {}
     },
     "public.pronunciation_dict": {
       "name": "pronunciation_dict",
@@ -352,28 +362,31 @@
         "pronunciation_dict_book_id_books_id_fk": {
           "name": "pronunciation_dict_book_id_books_id_fk",
           "tableFrom": "pronunciation_dict",
-          "tableTo": "books",
           "columnsFrom": [
             "book_id"
           ],
+          "tableTo": "books",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "pronunciation_dict_book_id_term_unique": {
           "name": "pronunciation_dict_book_id_term_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "book_id",
             "term"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
-      }
+      },
+      "policies": {},
+      "isRLSEnabled": false,
+      "checkConstraints": {}
     },
     "public.segments": {
       "name": "segments",
@@ -461,48 +474,57 @@
         "segments_chapter_id_chapters_id_fk": {
           "name": "segments_chapter_id_chapters_id_fk",
           "tableFrom": "segments",
-          "tableTo": "chapters",
           "columnsFrom": [
             "chapter_id"
           ],
+          "tableTo": "chapters",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "segments_speaker_cast_id_cast_members_id_fk": {
           "name": "segments_speaker_cast_id_cast_members_id_fk",
           "tableFrom": "segments",
-          "tableTo": "cast_members",
           "columnsFrom": [
             "speaker_cast_id"
           ],
+          "tableTo": "cast_members",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "segments_chapter_id_segment_index_unique": {
           "name": "segments_chapter_id_segment_index_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "chapter_id",
             "segment_index"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
-      }
+      },
+      "policies": {},
+      "isRLSEnabled": false,
+      "checkConstraints": {}
     }
   },
   "enums": {},
   "schemas": {},
   "_meta": {
-    "columns": {},
     "schemas": {},
-    "tables": {}
-  }
+    "tables": {},
+    "columns": {}
+  },
+  "id": "7fedcc48-4e39-4e0f-a5b0-59edf90eb5b5",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "sequences": {},
+  "policies": {},
+  "views": {},
+  "roles": {}
 }

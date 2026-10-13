@@ -65,9 +65,12 @@ it, only a new anchor does. `ensureLookahead` is the only way out of `pending`. 
 inside the window to `LOOKAHEAD_PRIORITY` (64 per `changePriority` batch), atomically promotes the
 window's pending rows to `queued` and enqueues them at that priority, and returns them to `pending`
 if the enqueue fails. Ingestion primes the window at the start of the book; a playback sync carrying
-`segmentIndex` and a buffering poll carrying `?at=` re-center it. Calls are throttled for 2 s per
-book, chapter, and segment (map capped at 5000 keys), so a moved anchor is never delayed, and a
-failed call releases its key so the same anchor can retry at once. Retries, the sweep, boot
+`segmentIndex` and a buffering poll carrying `?at=` re-center it. Each book is evaluated at most
+once per 2 s whatever its anchor, so varying `segmentIndex` cannot multiply the work. A repeated
+anchor inside that window is skipped; a moved one is held and evaluated when the window closes, the
+latest anchor winning, so it waits at most 2 s and is never lost. The throttle holds at most 5000
+books and evicts the least recently evaluated one rather than resetting every book, and a failed
+call releases its book so the next call can retry at once. Retries, the sweep, boot
 recovery, and lineage resets only touch rows that are already queued or mid-flight. The one
 exception is a user-requested regeneration: it claims its row from any status except `processing`,
 and if that run dies, the sweep requeues the row like any orphan.
@@ -85,7 +88,25 @@ chapter with no segments or no voiced segments fails rather than stitching silen
 **Sweep and recovery.** Boot runs temp-dir cleanup, chapter-counter repair, re-enqueue of `queued`
 rows, then a full sweep. The 5-minute sweep re-queues orphaned mid-flight segments, re-materializes
 stranded `queued` rows, refills the queue below `QUEUED_REFILL_WATERMARK` (100 jobs), enqueues
-counter-terminal stitches, and fails ingestions stuck past `INGESTION_STUCK_MS`.
+counter-terminal stitches, and fails ingestions stuck past `INGESTION_STUCK_MS`. Each orphan requeue
+counts one attempt whatever state the dead execution's job ended in (failed, completed, or already
+removed), and the row fails at `MAX_SEGMENT_ATTEMPTS`, so a segment that keeps killing its worker
+cannot cycle forever. A stalled job re-runs with `attemptsMade` unchanged, so `attemptsStarted > 1`
+is what tells the re-run to release the claim its dead execution left before claiming the row
+again. The stuck-ingestion check skips a book while its retry lock is held.
+
+**Book retry and deletion.** A retry holds the `retry:<bookId>` lock (5-minute TTL) for the whole
+call, so a second retry is turned away and the sweep leaves the book alone between claiming it and
+queueing its ingestion. It removes the failed run's jobs first, then one transaction claims the
+book (`failed` → `discovering`) and deletes its chapters (segments cascade) and cast; a failure
+part-way rolls back and leaves the book failed and retryable. The pronunciation dictionary is the
+user's and carries over. The old run's segment and chapter audio is purged before the new ingestion
+is queued, because the new run writes under the same index-based keys, and a failed enqueue puts the
+book back to `failed`. Deletion removes the book's jobs, deletes its row (everything else
+cascades), and purges in the background every recorded key plus every key the layout implies
+(`original.epub`, each `chapter_<n>.mp3`, each segment's wav), since storage cannot list a prefix.
+Running jobs cannot be removed and keep writing, so the keys they write are purged again once each
+has left `active`, polling every 5 s for at most 15 minutes.
 
 ## Narration
 
