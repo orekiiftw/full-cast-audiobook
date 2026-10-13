@@ -95,7 +95,7 @@ function reportSecurityPosture(): void {
     return;
   }
 
-  if (isProduction) {
-    console.log("🔒 Session cookies are Secure-only (HTTPS required). Set INSECURE_HTTP=true for plain-HTTP deployments.");
-  }
+  console.log(
+    "🔒 Session cookies are Secure-only (HTTPS, or http://localhost in Chrome/Firefox). Set INSECURE_HTTP=true for plain-HTTP deployments.",
+  );
 }

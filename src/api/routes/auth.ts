@@ -48,7 +48,7 @@ async function signUp({ req, connectionIp }: PublicRouteContext): Promise<Respon
   }
 
   const session = await createSession(created.id);
-  return withCookie({ user: created }, sessionCookie(req, session.token, session.expiresAt), 201);
+  return withCookie({ user: created }, sessionCookie(session.token, session.expiresAt), 201);
 }
 
 async function logIn({ req, connectionIp }: PublicRouteContext): Promise<Response> {
@@ -59,7 +59,7 @@ async function logIn({ req, connectionIp }: PublicRouteContext): Promise<Respons
   if (!account) return json({ error: "Invalid email or password." }, 401);
 
   const session = await createSessionRotating(account.id);
-  return withCookie({ user: { id: account.id, email: account.email } }, sessionCookie(req, session.token, session.expiresAt));
+  return withCookie({ user: { id: account.id, email: account.email } }, sessionCookie(session.token, session.expiresAt));
 }
 
 async function logOut({ req }: PublicRouteContext): Promise<Response> {
@@ -67,7 +67,7 @@ async function logOut({ req }: PublicRouteContext): Promise<Response> {
   if (token) {
     await revokeSession(token);
   }
-  return withCookie({ success: true }, clearSessionCookie(req));
+  return withCookie({ success: true }, clearSessionCookie());
 }
 
 async function currentUser({ user }: PublicRouteContext): Promise<Response> {

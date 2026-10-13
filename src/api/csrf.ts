@@ -1,4 +1,5 @@
 import { json } from "./response";
+import { publicRequestUrl } from "../lib/requestUrl";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
@@ -16,7 +17,7 @@ export function csrfGuard(req: Request): Response | null {
     return null;
   }
 
-  switch (classifyOrigin(origin, req.url)) {
+  switch (classifyOrigin(origin, req)) {
     case "allowed":
       return null;
     case "invalid":
@@ -28,10 +29,10 @@ export function csrfGuard(req: Request): Response | null {
 
 type OriginVerdict = "allowed" | "denied" | "invalid";
 
-function classifyOrigin(origin: string, requestUrl: string): OriginVerdict {
+function classifyOrigin(origin: string, req: Request): OriginVerdict {
   try {
     const originUrl = new URL(origin);
-    const { origin: requestOrigin, hostname: requestHostname } = new URL(requestUrl);
+    const { origin: requestOrigin, hostname: requestHostname } = publicRequestUrl(req);
     const configured = process.env.CORS_ORIGIN;
     const configuredOrigin = configured ? configured.trim() : null;
 

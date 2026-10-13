@@ -34,14 +34,12 @@ export function readSessionToken(req: Request): string | null {
   return null;
 }
 
-export function sessionCookie(req: Request, token: string, expires: Date): string {
-  const secure = cookieSecure(req) ? "; Secure" : "";
-  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Expires=${expires.toUTCString()}${secure}`;
+export function sessionCookie(token: string, expires: Date): string {
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Expires=${expires.toUTCString()}${secureAttribute()}`;
 }
 
-export function clearSessionCookie(req: Request): string {
-  const secure = cookieSecure(req) ? "; Secure" : "";
-  return `${SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`;
+export function clearSessionCookie(): string {
+  return `${SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secureAttribute()}`;
 }
 
 export function parsedClientIp(req: Request, connectionIp: string): string {
@@ -129,9 +127,6 @@ function sweepExpiredSessions(probability: number): void {
     .catch((err) => console.warn("Session sweep failed:", err));
 }
 
-function cookieSecure(req: Request): boolean {
-  if (process.env.INSECURE_HTTP === "true") return false;
-  if (process.env.NODE_ENV === "production") return true;
-  const forwarded = process.env.TRUST_PROXY === "true" ? req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() : undefined;
-  return new URL(req.url).protocol === "https:" || forwarded === "https";
+function secureAttribute(): string {
+  return process.env.INSECURE_HTTP === "true" ? "" : "; Secure";
 }

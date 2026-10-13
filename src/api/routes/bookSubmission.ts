@@ -1,58 +1,49 @@
 import { ACQUISITION } from "../../lib/constants";
 import { ValidationError, isZipBuffer } from "../../lib/validators";
 import type { BookSubmission } from "../../books/submission";
-import { readBodyWithLimit, readJsonWithLimit } from "../body";
+import { readJsonWithLimit } from "../body";
+import { readMultipartForm } from "../multipart";
 
 const MAX_UPLOAD_BYTES = 80 * 1024 * 1024;
 
 const MAX_MULTIPART_BODY_BYTES = MAX_UPLOAD_BYTES + 1024 * 1024;
 
+const MAX_FORM_FIELD_BYTES = 64 * 1024;
+
+export function isMultipartRequest(req: Request): boolean {
+  return (req.headers.get("content-type") ?? "").includes("multipart/form-data");
+}
+
 export async function readBookSubmission(req: Request): Promise<BookSubmission> {
-  if ((req.headers.get("content-type") ?? "").includes("multipart/form-data")) {
-    return readMultipartSubmission(req);
-  }
-  return readJsonSubmission(req);
+  return isMultipartRequest(req) ? readMultipartSubmission(req) : readJsonSubmission(req);
 }
 
 async function readMultipartSubmission(req: Request): Promise<BookSubmission> {
-  const submission: BookSubmission = { title: "", author: "", magnetOrHash: "" };
-
   try {
-    const bodyBuffer = await readBodyWithLimit(req, MAX_MULTIPART_BODY_BYTES);
-    const formData = await readFormData(req, bodyBuffer);
+    const form = await readMultipartForm(req, {
+      textFields: ["title", "author", "magnet"],
+      fileField: "file",
+      maxBodyBytes: MAX_MULTIPART_BODY_BYTES,
+      maxFieldBytes: MAX_FORM_FIELD_BYTES,
+      maxFileBytes: MAX_UPLOAD_BYTES,
+      fileTooLarge: () => new ValidationError(`EPUB exceeds maximum upload size of ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB`),
+    });
+    const submission: BookSubmission = {
+      title: (form.fields.get("title") ?? "").trim(),
+      author: (form.fields.get("author") ?? "").trim(),
+      magnetOrHash: (form.fields.get("magnet") ?? "").trim(),
+    };
 
-    submission.title = readFormField(formData, "title");
-    submission.author = readFormField(formData, "author");
-    submission.magnetOrHash = readFormField(formData, "magnet");
-
-    const file = formData.get("file");
-    if (!(file instanceof Blob) || file.size === 0) {
-      return submission;
-    }
-    if (file.size > MAX_UPLOAD_BYTES) {
-      throw new ValidationError(`EPUB exceeds maximum upload size of ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB`);
-    }
-
-    const epubBuffer = Buffer.from(await file.arrayBuffer());
-    if (!isZipBuffer(epubBuffer)) {
+    if (!form.file || form.file.length === 0) return submission;
+    if (!isZipBuffer(form.file)) {
       throw new ValidationError("The uploaded file is not a valid EPUB (ZIP) archive.");
     }
-    submission.epubBuffer = epubBuffer;
+    submission.epubBuffer = form.file;
+    return submission;
   } catch (error) {
     if (error instanceof ValidationError) throw error;
     throw new ValidationError("Malformed multipart request body.");
   }
-
-  return submission;
-}
-
-function readFormData(req: Request, bodyBuffer: Buffer): Promise<FormData> {
-  const formRequest = new Request("http://localhost/upload", {
-    method: "POST",
-    headers: Object.fromEntries(Array.from(req.headers.entries()).filter(([key]) => key.toLowerCase() === "content-type")),
-    body: new Uint8Array(bodyBuffer),
-  });
-  return formRequest.formData();
 }
 
 async function readJsonSubmission(req: Request): Promise<BookSubmission> {
@@ -92,8 +83,4 @@ function readProviderBookRef(requested: Record<string, unknown>): ProviderBookRe
     throw new ValidationError(`book id must be ${ACQUISITION.MAX_PROVIDER_BOOK_ID_LENGTH} characters or fewer`);
   }
   return { provider: requested.provider, id: requested.id };
-}
-
-function readFormField(formData: FormData, key: string): string {
-  return ((formData.get(key) as string) ?? "").trim();
 }

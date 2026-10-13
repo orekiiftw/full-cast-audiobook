@@ -321,6 +321,9 @@ loopback-to-loopback pair (so the Vite dev server can call the API), or an exact
 match. A missing `Origin` is allowed — non-browser clients do not send one and are not the threat.
 `CORS_ORIGIN` is read per request here but captured at module load in `response.ts`; that asymmetry
 is intentional, since headers only need to be right at startup while tests flip the variable.
+Same-origin is judged against the public URL: with `TRUST_PROXY=true` its scheme comes from
+`X-Forwarded-Proto`, because a TLS-terminating proxy hands the server `http://` URLs while the
+browser's `Origin` is `https://`.
 
 **Rate limits** are fixed windows: the first call starts the window and counts as attempt 1, and a
 key trips only when its count exceeds the maximum; entries are swept at most once a minute.
@@ -338,6 +341,12 @@ is `failed` is retried rather than returned dead, since the user's intent was cl
 it. The insert runs first and the `(user_id, source_hash)` unique constraint is the dedupe check, so
 a new book costs one database round trip and only a conflict reads the existing row. Multipart
 parser errors are flattened to one constant message so internals never leak.
+
+**Multipart uploads stream through `api/multipart.ts`** rather than being buffered and re-parsed
+by `Request.formData()`, which held about four times the file size in memory. Only the first
+`file` part is kept, copied once into a buffer sized from `Content-Length`; text fields are capped
+at 64 KB; reading stops as soon as the file passes 80 MB. Each user may have two multipart uploads
+in flight per instance, and a third gets 429 before its body is read.
 
 **Audio streaming** authorizes before touching storage: keys under `books/<uuid>/` are checked by
 owning that book, anything else against the user's own cover, EPUB, chapter-audio, and segment-audio

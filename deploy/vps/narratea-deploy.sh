@@ -5,6 +5,12 @@
 # Deploys origin/main only when its GitHub check runs are green (or when the
 # commit has none, e.g. the very first deploy before CI existed). Exits quietly
 # when there is nothing to do, so the timer's journal stays readable.
+#
+# A revision counts as deployed only after the restarted service passes its
+# health check; only then is it written to .git/narratea-deployed-rev. The
+# timer compares origin/main against that record, not against HEAD (which
+# moves at the start of a deploy), so a deploy that fails at any step is
+# retried on the next tick.
 set -euo pipefail
 
 APP=/mnt/book_data/narratea
@@ -12,14 +18,17 @@ BUN=/home/ubuntu/.bun/bin/bun
 BRANCH=main
 REPO=orekiiftw/full-cast-audiobook
 API="https://api.github.com/repos/${REPO}/commits"
+HEALTH_URL=http://127.0.0.1:3000/healthz
 
 cd "$APP"
 
-git fetch --quiet --prune origin "$BRANCH"
-local_rev=$(git rev-parse HEAD)
-remote_rev=$(git rev-parse "origin/${BRANCH}")
+deployed_file=$(git rev-parse --git-path narratea-deployed-rev)
 
-if [ "$local_rev" = "$remote_rev" ]; then
+git fetch --quiet --prune origin "$BRANCH"
+remote_rev=$(git rev-parse "origin/${BRANCH}")
+deployed_rev=$(cat "$deployed_file" 2>/dev/null || true)
+
+if [ "$deployed_rev" = "$remote_rev" ]; then
   exit 0
 fi
 
@@ -49,12 +58,14 @@ case "$verdict" in
     exit 0
     ;;
   *)
-    echo "[deploy] ${remote_rev} has failing check runs; leaving the app on ${local_rev}"
+    echo "[deploy] ${remote_rev} has failing check runs; leaving the app on ${deployed_rev:-the current checkout}"
     exit 0
     ;;
 esac
 
-echo "[deploy] ${local_rev} -> ${remote_rev}"
+trap 'echo "[deploy] ${remote_rev} failed (line ${LINENO}); retrying next tick" >&2' ERR
+
+echo "[deploy] ${deployed_rev:-unrecorded} -> ${remote_rev}"
 git reset --hard --quiet "origin/${BRANCH}"
 
 echo "[deploy] dependencies"
@@ -68,7 +79,14 @@ echo "[deploy] migrations"
 
 echo "[deploy] restarting service"
 sudo -n systemctl restart narratea
-sleep 4
-systemctl is-active narratea
-echo "[deploy] http $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/healthz)"
+
+echo "[deploy] health check"
+if ! curl -fs -o /dev/null --max-time 5 --retry 30 --retry-delay 4 --retry-max-time 120 --retry-connrefused "$HEALTH_URL"; then
+  echo "[deploy] ${remote_rev} never passed ${HEALTH_URL}; retrying next tick" >&2
+  exit 1
+fi
+systemctl is-active --quiet narratea
+
+printf '%s\n' "$remote_rev" >"${deployed_file}.tmp"
+mv -f "${deployed_file}.tmp" "$deployed_file"
 echo "[deploy] done ${remote_rev}"

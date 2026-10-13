@@ -1,5 +1,6 @@
 import * as path from "path";
 import { gzipSync } from "node:zlib";
+import { trustedForwardedProto } from "./lib/requestUrl";
 
 const DIST_ROOT = path.resolve("./dist");
 
@@ -107,8 +108,7 @@ async function respondWithFile(req: Request, url: URL, filePath: string, file: R
 }
 
 function hstsHeader(req: Request): Record<string, string> {
-  const forwardedProto = process.env.TRUST_PROXY === "true" ? req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() : undefined;
-  const isHttps = new URL(req.url).protocol === "https:" || forwardedProto === "https";
+  const isHttps = new URL(req.url).protocol === "https:" || trustedForwardedProto(req) === "https";
   return isHttps ? { "Strict-Transport-Security": "max-age=63072000; includeSubDomains" } : {};
 }
 

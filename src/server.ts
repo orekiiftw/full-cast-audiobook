@@ -4,7 +4,9 @@ import { stopPipeline } from "./queue";
 import { parsedClientIp } from "./auth";
 import { serveStaticFile } from "./staticFiles";
 import { reportEnvironment } from "./environment";
+import { logUnhandledRejections } from "./processErrors";
 
+logUnhandledRejections();
 reportEnvironment();
 
 await startPipeline();
