@@ -79,6 +79,7 @@ export function useSegmentSync({
   const pollInFlightRef = useRef(false);
   const lastRefreshRef = useRef(0);
   const refreshTimerRef = useRef<number | null>(null);
+  const refreshSeqRef = useRef(0);
 
   const clearPoll = useCallback(() => {
     if (pollIntervalRef.current) {
@@ -88,12 +89,14 @@ export function useSegmentSync({
   }, []);
 
   const refreshSegments = useCallback(async () => {
+    const seq = ++refreshSeqRef.current;
     try {
       const waitedSegmentIndex = findWaitedSegmentIndex(refs);
       const anchorQuery = waitedSegmentIndex === null ? "" : `?at=${waitedSegmentIndex}`;
       const response = await apiFetch(`/api/chapters/${chapterId}/segments${anchorQuery}`);
       if (!response.ok) return null;
       const data = (await response.json()) as { segments?: Segment[] };
+      if (seq !== refreshSeqRef.current) return null;
       const freshSegments = data.segments ?? [];
       setSegmentsList(freshSegments);
       return freshSegments;
@@ -173,6 +176,7 @@ export function useSegmentSync({
     (event: SegmentReadyEvent) => {
       const patched = applySegmentReady(refs.segments.current, event);
       if (patched === refs.segments.current) return;
+      refreshSeqRef.current += 1;
       setSegmentsList(patched);
       advanceFromFreshSegments(patched);
     },

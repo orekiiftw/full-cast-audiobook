@@ -49,7 +49,9 @@ export function useAudioTransport(session: AudioElementSession): AudioTransport 
 
   const setPlaybackRate = useCallback(
     (rate: number) => {
-      (audioRef.current ?? getSharedAudio()).playbackRate = rate;
+      const audio = audioRef.current ?? getSharedAudio();
+      audio.defaultPlaybackRate = rate;
+      audio.playbackRate = rate;
     },
     [audioRef],
   );

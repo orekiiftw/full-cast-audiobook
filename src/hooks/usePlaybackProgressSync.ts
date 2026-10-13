@@ -22,29 +22,36 @@ export function usePlaybackProgressSync({
   activeBookId,
   activeChapterId,
 }: UsePlaybackProgressSyncOptions) {
-  const syncPosition = useCallback(() => {
-    const target = targetRef.current;
-    if (!target) return;
+  const syncPosition = useCallback(
+    (notifyOnUnauthorized = true) => {
+      const target = targetRef.current;
+      if (!target) return;
 
-    void apiFetch("/api/playback", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        bookId: target.bookId,
-        chapterId: target.chapterId,
-        positionMs: positionRef.current,
-        segmentIndex: segmentIndexRef.current,
-      }),
-    }).catch(console.error);
-  }, [positionRef, segmentIndexRef, targetRef]);
+      void apiFetch(
+        "/api/playback",
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bookId: target.bookId,
+            chapterId: target.chapterId,
+            positionMs: positionRef.current,
+            segmentIndex: segmentIndexRef.current,
+          }),
+        },
+        { notifyOnUnauthorized },
+      ).catch(console.error);
+    },
+    [positionRef, segmentIndexRef, targetRef],
+  );
 
   useEffect(() => {
     if (!activeBookId || !activeChapterId) return;
 
-    const interval = setInterval(syncPosition, PLAYBACK.POSITION_SYNC_INTERVAL_MS);
+    const interval = setInterval(() => syncPosition(), PLAYBACK.POSITION_SYNC_INTERVAL_MS);
     return () => {
       clearInterval(interval);
-      syncPosition();
+      syncPosition(false);
     };
   }, [activeBookId, activeChapterId, syncPosition]);
 

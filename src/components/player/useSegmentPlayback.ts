@@ -117,6 +117,9 @@ export function useSegmentPlayback({
         setIsBufferingNext(true);
         startPollingForSegment(activeSegment.id);
       } else {
+        clearPoll();
+        if (refs.isBufferingNext.current) setIsBufferingNext(false);
+        refs.awaitingNext.current = false;
         audio.pause();
         setIsPlaying(false);
       }
