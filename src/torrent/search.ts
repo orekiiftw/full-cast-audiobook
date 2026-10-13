@@ -16,14 +16,18 @@ const MAX_SEARCH_ATTEMPTS = 2;
 
 const SEARCH_RETRY_DELAY_MS = 750;
 
-let torBoxSearchDownReason: string | null = null;
+const SEARCH_PAUSE_MS = 5 * 60_000;
+
+const SEARCH_MAX_PAUSE_MS = 60 * 60_000;
+
+let torBoxSearchCircuit: { reason: string; pausedUntil: number; trips: number } | null = null;
 
 export function torBoxSearchDown(): string | null {
-  return torBoxSearchDownReason;
+  return torBoxSearchCircuit && Date.now() < torBoxSearchCircuit.pausedUntil ? torBoxSearchCircuit.reason : null;
 }
 
 export function resetTorBoxSearchCircuit(): void {
-  torBoxSearchDownReason = null;
+  torBoxSearchCircuit = null;
 }
 
 export function buildTorrentSearchQueries(title: string, author: string): string[] {
@@ -67,7 +71,8 @@ export function infohashFromMagnet(magnet: string): string {
 }
 
 export async function searchTorBox(query: string): Promise<TorrentHit[]> {
-  if (torBoxSearchDownReason) throw new Error(torBoxSearchDownReason);
+  const downReason = torBoxSearchDown();
+  if (downReason) throw new Error(downReason);
   const apiKey = torBoxApiKey();
   if (!apiKey) throw new Error("TORBOX_API_KEY not set");
   let lastError: Error = new Error("TorBox search failed");
@@ -98,6 +103,7 @@ export async function searchTorBox(query: string): Promise<TorrentHit[]> {
     } else if (!response.ok) {
       lastError = new Error(`HTTP ${response.status}`);
     } else {
+      resetTorBoxSearchCircuit();
       const json = await readJson<{ data?: unknown; torrents?: unknown; error?: string }>(response, "TorBox search");
       const rows = normalizeList(json.data ?? json.torrents);
       if (!rows.length) throw new Error(json.error || "No results returned");
@@ -163,9 +169,11 @@ export async function searchTorrentsCsv(queries: string[]): Promise<TorrentHit[]
 }
 
 function markTorBoxSearchDown(reason: string): void {
-  if (torBoxSearchDownReason) return;
-  torBoxSearchDownReason = reason;
-  console.warn(`⚠️ TorBox search disabled for this process (${reason}); using the fallback indexers.`);
+  if (torBoxSearchDown()) return;
+  const trips = (torBoxSearchCircuit?.trips ?? 0) + 1;
+  const pauseMs = Math.min(SEARCH_PAUSE_MS * 2 ** (trips - 1), SEARCH_MAX_PAUSE_MS);
+  torBoxSearchCircuit = { reason, pausedUntil: Date.now() + pauseMs, trips };
+  console.warn(`⚠️ TorBox search paused for ${pauseMs / 60_000} min (${reason}); using the fallback indexers.`);
 }
 
 async function collectIndexerHits(queries: string[], searchQuery: (query: string) => Promise<TorrentHit[]>): Promise<TorrentHit[]> {

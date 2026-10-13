@@ -8,6 +8,8 @@ const originalFetch = globalThis.fetch;
 
 const originalTorBoxApiKey = process.env.TORBOX_API_KEY;
 
+const originalCatalogueBaseUrl = process.env.CATALOGUE_BASE_URL;
+
 export function zipResponse(): Response {
   return new Response(new Uint8Array(ZIP_BUFFER), { headers: { "content-length": String(ZIP_BUFFER.length) } });
 }
@@ -20,4 +22,6 @@ export function restoreFetchAndEnvironment(): void {
   globalThis.fetch = originalFetch;
   if (originalTorBoxApiKey === undefined) delete process.env.TORBOX_API_KEY;
   else process.env.TORBOX_API_KEY = originalTorBoxApiKey;
+  if (originalCatalogueBaseUrl === undefined) delete process.env.CATALOGUE_BASE_URL;
+  else process.env.CATALOGUE_BASE_URL = originalCatalogueBaseUrl;
 }

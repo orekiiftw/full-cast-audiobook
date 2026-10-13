@@ -1,11 +1,14 @@
 import { parseEpub } from "../../epub";
+import { TORRENT } from "../../lib/constants";
+import { isAllowedHost } from "../../lib/hosts";
 import { detectIndicLanguage, normalizeLanguageCode, INDIC_LANGUAGES } from "../../lib/language";
 import { readStreamWithCap } from "../../lib/readStream";
+import { redirectFailureMessage, type RedirectGuard } from "../../lib/redirectGuard";
 import { isZipBuffer } from "../../lib/validators";
 import { errorMessage } from "../../lib/errors";
-import { ProviderUnavailableError } from "../errors";
+import { ProviderUnavailableError, UnsupportedFormatError } from "../errors";
 import { rankBooks } from "../ranking";
-import { BookProvider, BookResult } from "../types";
+import { AcquiredBook, BookProvider, BookResult } from "../types";
 
 const THIRD_PARTY_JSON_CAP = 8 * 1024 * 1024;
 
@@ -35,6 +38,18 @@ export function parseYear(value: unknown): number | undefined {
     if (Number.isFinite(parsed)) return parsed;
   }
   return undefined;
+}
+
+export function providerRedirectGuard(label: string, allowedHosts: readonly string[], provider: string): RedirectGuard {
+  return {
+    approve: (target) => {
+      if (target.protocol !== "https:" || !isAllowedHost(target.hostname, allowedHosts)) {
+        throw new ProviderUnavailableError(`${label} redirected to an untrusted destination`, provider);
+      }
+      return target;
+    },
+    fail: (failure) => new ProviderUnavailableError(redirectFailureMessage(label, failure), provider),
+  };
 }
 
 export async function acquireFirstUsableEpub(
@@ -68,7 +83,7 @@ async function acquireCandidate(
   try {
     onProgress?.(`Attempting "${result.title}" from ${label}...`);
     const acquired = await provider.acquire(result);
-    const buffer = await readStreamBuffer(acquired.stream);
+    const buffer = await readAcquiredBook(acquired);
     if (buffer.length <= MIN_USABLE_EPUB_BYTES || !isZipBuffer(buffer)) return null;
     if (!hasScriptMatchingClaim(result, buffer)) {
       console.warn(`${label} item '${result.id}' claims language '${result.language}' but its text contains no such script; skipping.`);
@@ -82,15 +97,13 @@ async function acquireCandidate(
   }
 }
 
-async function readStreamBuffer(stream: ReadableStream<Uint8Array>): Promise<Buffer> {
-  const chunks: Uint8Array[] = [];
-  const reader = stream.getReader();
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) chunks.push(value);
+async function readAcquiredBook({ stream, contentLength }: AcquiredBook): Promise<Buffer> {
+  const exceeded = () => new UnsupportedFormatError("The provider file exceeds the 200MB EPUB limit.");
+  if ((contentLength ?? 0) > TORRENT.MAX_FILE_SIZE_BYTES) {
+    await stream.cancel().catch(() => {});
+    throw exceeded();
   }
-  return Buffer.concat(chunks);
+  return readStreamWithCap(stream, TORRENT.MAX_FILE_SIZE_BYTES, exceeded);
 }
 
 function hasScriptMatchingClaim(result: BookResult, buffer: Buffer): boolean {

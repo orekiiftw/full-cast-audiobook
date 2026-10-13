@@ -1,7 +1,8 @@
 import { BookNotFoundError, ProviderUnavailableError } from "../errors";
 import { AcquiredBook, BookDetails, BookProvider, BookResult, SearchQuery } from "../types";
-import { acquireFirstUsableEpub, readProviderJson } from "./shared";
+import { acquireFirstUsableEpub, providerRedirectGuard, readProviderJson } from "./shared";
 import { isAllowedHost } from "../../lib/hosts";
+import { fetchWithRedirectGuard } from "../../lib/redirectGuard";
 
 interface GutendexBook {
   id: number;
@@ -13,6 +14,8 @@ interface GutendexBook {
 }
 
 const GUTENBERG_HOSTS = ["gutenberg.org", "www.gutenberg.org"];
+
+const GUTENDEX_HOSTS = ["gutendex.com"];
 
 interface GutendexSearchResponse {
   results?: GutendexBook[];
@@ -26,7 +29,12 @@ export class GutenbergProvider implements BookProvider {
     if (!term) return [];
 
     const url = `https://gutendex.com/books/?search=${encodeURIComponent(term)}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(45_000), headers: { Accept: "application/json" } });
+    const res = await fetchWithRedirectGuard({
+      url,
+      timeoutMs: 45_000,
+      guard: providerRedirectGuard("Gutendex search", GUTENDEX_HOSTS, this.name),
+      headers: { Accept: "application/json" },
+    });
     if (!res.ok) throw new ProviderUnavailableError(`Gutendex search returned HTTP ${res.status}`, this.name);
     const data = await readProviderJson<GutendexSearchResponse>(res, "Gutendex search", this.name);
 
@@ -78,7 +86,12 @@ async function acquireDirectEpub(book: BookResult, allowedHosts: string[], provi
   if (url.protocol !== "https:" || !isAllowedHost(host, allowedHosts)) {
     throw new ProviderUnavailableError(`Invalid download destination: ${host}`, providerName);
   }
-  const res = await fetch(url, { signal: AbortSignal.timeout(120_000), redirect: "follow", headers: { "User-Agent": "Mozilla/5.0" } });
+  const res = await fetchWithRedirectGuard({
+    url: url.toString(),
+    timeoutMs: 120_000,
+    guard: providerRedirectGuard(`${providerName} download`, allowedHosts, providerName),
+    headers: { "User-Agent": "Mozilla/5.0" },
+  });
   if (!res.ok || !res.body) throw new ProviderUnavailableError(`${providerName} download returned HTTP ${res.status}`, providerName);
   return {
     stream: res.body,

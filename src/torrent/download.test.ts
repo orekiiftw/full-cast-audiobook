@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
-import { selectTorrentFile } from "./download";
+import { readVerifiedBook, selectTorrentFile } from "./download";
+import { ZIP_BUFFER, zipResponse } from "./testSupport";
 
 describe("selectTorrentFile md5 file selection", () => {
   const files = [
@@ -25,6 +27,14 @@ describe("selectTorrentFile md5 file selection", () => {
     expect(selectTorrentFile(files, "nonexistentdeadbeefdeadbeefdeadbeef")?.id).toBe(0);
   });
 
+  test("ignores an expected md5 that is not 32 hex characters", () => {
+    const withCompanion = [
+      { id: 0, name: "the-book.epub", size: 2000 },
+      { id: 1, name: "dead-sea-companion.epub", size: 100 },
+    ];
+    expect(selectTorrentFile(withCompanion, "dead")?.id).toBe(0);
+  });
+
   test("skips sample chapters and .epub.txt decoys", () => {
     const decoys = [
       { id: 0, name: "book.epub.txt", size: 100 },
@@ -32,5 +42,16 @@ describe("selectTorrentFile md5 file selection", () => {
       { id: 2, name: "actual-book.epub", size: 200 },
     ];
     expect(selectTorrentFile(decoys)?.id).toBe(2);
+  });
+});
+
+describe("readVerifiedBook md5 check", () => {
+  test("rejects bytes that do not hash to the expected md5", async () => {
+    await expect(readVerifiedBook(zipResponse(), "book.epub", "0".repeat(32))).rejects.toThrow("expected md5");
+  });
+
+  test("accepts bytes that hash to the expected md5", async () => {
+    const md5 = createHash("md5").update(ZIP_BUFFER).digest("hex");
+    expect((await readVerifiedBook(zipResponse(), "book.epub", md5)).buffer).toEqual(ZIP_BUFFER);
   });
 });

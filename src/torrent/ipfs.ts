@@ -59,9 +59,9 @@ async function downloadFromCatalogueNode(
   const token = env("CATALOGUE_TOKEN");
   const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  const url = new URL(`ipfs/${cid}`, base.endsWith("/") ? base : `${base}/`).toString();
 
   try {
+    const url = new URL(`ipfs/${cid}`, base.endsWith("/") ? base : `${base}/`).toString();
     onProgress?.("Downloading from self-hosted VPS IPFS node...");
     const response = await fetchIpfsWithValidatedRedirects(url, [new URL(base).hostname], headers);
     return response.ok ? await readVerifiedBook(response, "book.epub") : null;

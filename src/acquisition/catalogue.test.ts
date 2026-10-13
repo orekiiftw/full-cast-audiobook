@@ -102,6 +102,23 @@ test("drops hits without a resolvable infohash and dedupes by hash", async () =>
   expect(candidates[0].md5).toBe("b".repeat(32));
 });
 
+test("drops hits whose md5 is not 32 hex characters", async () => {
+  useLocalCatalogue();
+  mockCatalogueFetch(async () =>
+    jsonResponse({
+      count: 3,
+      results: [
+        hit({ md5: "0", infohash: "c".repeat(40) }),
+        hit({ md5: "dead", infohash: "d".repeat(40) }),
+        hit({ md5: "E".repeat(32), infohash: "e".repeat(40) }),
+      ],
+    }),
+  );
+
+  const candidates = await searchCatalogueTorrentCandidates("X");
+  expect(candidates.map((candidate) => candidate.md5)).toEqual(["e".repeat(32)]);
+});
+
 test("falls back to a title-only query when the author filter matches nothing (pen-name case)", async () => {
   useLocalCatalogue();
   const calls: string[] = [];

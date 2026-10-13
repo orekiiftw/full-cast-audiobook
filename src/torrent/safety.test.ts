@@ -48,6 +48,25 @@ describe("isPrivateIp", () => {
     expect(isPrivateHost("127.0.0.1")).toBe(true);
     expect(isPrivateHost("example.com")).toBe(false);
   });
+
+  test("classifies IPv6 by address range rather than by spelling", () => {
+    const privateAddresses = [
+      "fe90::1",
+      "fec0::1",
+      "ff02::1",
+      "2002:7f00:1::",
+      "64:ff9b::7f00:1",
+      "0:0:0:0:0:ffff:7f00:1",
+      "0:0:0:0:0:ffff:127.0.0.1",
+      "2001:0:4136:e378:8000:63bf:3fff:fdd2",
+      "fe80::1%eth0",
+    ];
+    const publicAddresses = ["2606:4700:4700::1111", "2002:808:808::1", "64:ff9b::808:808", "2a00:1450:4001:80b::200e"];
+    expect(privateAddresses.filter((ip) => !isPrivateIp(ip))).toEqual([]);
+    expect(publicAddresses.filter((ip) => isPrivateIp(ip))).toEqual([]);
+    expect(isPrivateHost("[fec0::1]")).toBe(true);
+    expect(isPrivateHost("[2002:7f00:1::]")).toBe(true);
+  });
 });
 
 describe("isIpfsCid", () => {

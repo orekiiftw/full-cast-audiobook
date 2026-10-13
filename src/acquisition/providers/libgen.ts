@@ -1,9 +1,12 @@
 import { readStreamWithCap } from "../../lib/readStream";
+import { fetchWithRedirectGuard } from "../../lib/redirectGuard";
 import { BookNotFoundError, ProviderUnavailableError } from "../errors";
 import { AcquiredBook, BookDetails, BookFormat, BookProvider, BookResult, SearchQuery } from "../types";
-import { acquireFirstUsableEpub, parseYear } from "./shared";
+import { acquireFirstUsableEpub, parseYear, providerRedirectGuard } from "./shared";
 
 const MAX_LIBGEN_SEARCH_BYTES = 8 * 1024 * 1024;
+
+const LIBGEN_HOSTS = ["libgen.li"];
 
 export class LibgenProvider implements BookProvider {
   readonly name = "libgen";
@@ -14,7 +17,12 @@ export class LibgenProvider implements BookProvider {
     if (!term) return [];
 
     const url = `${this.base}/index.php?req=${encodeURIComponent(term)}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(30_000), headers: { "User-Agent": "Mozilla/5.0", Accept: "text/html" } });
+    const res = await fetchWithRedirectGuard({
+      url,
+      timeoutMs: 30_000,
+      guard: providerRedirectGuard("LibGen search", LIBGEN_HOSTS, this.name),
+      headers: { "User-Agent": "Mozilla/5.0", Accept: "text/html" },
+    });
     if (!res.ok) throw new ProviderUnavailableError(`LibGen search returned HTTP ${res.status}`, this.name);
     if (!res.body) throw new ProviderUnavailableError("LibGen search returned an empty body.", this.name);
     const buffer = await readStreamWithCap(
@@ -49,18 +57,21 @@ export class LibgenProvider implements BookProvider {
     const md5 = book.id;
     if (!/^[a-f0-9]{32}$/i.test(md5)) throw new BookNotFoundError(`LibGen book id '${md5}' is not an md5.`);
 
-    const ads = await fetch(`${this.base}/ads.php?md5=${md5}`, {
-      signal: AbortSignal.timeout(30_000),
+    const ads = await fetchWithRedirectGuard({
+      url: `${this.base}/ads.php?md5=${md5}`,
+      timeoutMs: 30_000,
+      guard: providerRedirectGuard("LibGen download page", LIBGEN_HOSTS, this.name),
       headers: { "User-Agent": "Mozilla/5.0", Accept: "text/html" },
     });
     if (!ads.ok) throw new ProviderUnavailableError(`LibGen download page returned HTTP ${ads.status}`, this.name);
     const key = (await ads.text()).match(/get\.php\?md5=([a-f0-9]{32})&key=([A-Za-z0-9]+)/i);
     if (!key) throw new BookNotFoundError(`LibGen has no download key for '${md5}'.`);
 
-    const res = await fetch(`${this.base}/get.php?md5=${key[1]}&key=${key[2]}`, {
-      signal: AbortSignal.timeout(120_000),
+    const res = await fetchWithRedirectGuard({
+      url: `${this.base}/get.php?md5=${key[1]}&key=${key[2]}`,
+      timeoutMs: 120_000,
+      guard: providerRedirectGuard("LibGen download", LIBGEN_HOSTS, this.name),
       headers: { "User-Agent": "Mozilla/5.0" },
-      redirect: "follow",
     });
     if (!res.ok || !res.body) throw new ProviderUnavailableError(`LibGen download returned HTTP ${res.status}`, this.name);
     const contentType = res.headers.get("content-type") ?? "";

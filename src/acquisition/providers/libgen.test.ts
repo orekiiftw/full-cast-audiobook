@@ -1,5 +1,7 @@
 import { describe, expect, it, mock } from "bun:test";
+import type { BookResult } from "../types";
 import { LibgenProvider } from "./libgen";
+import { mockFetchFollowingRedirects, redirectResponse } from "./testSupport";
 
 describe("LibgenProvider", () => {
   const searchHtml = `
@@ -66,6 +68,34 @@ describe("LibgenProvider", () => {
           mirrors: [{ id: "x", label: "LibGen", kind: "direct", url: "https://libgen.li/ads.php?md5=5cd226ba3a3b1e02cdcd58ef2618d6d1" }],
         }),
       ).rejects.toThrow("served an error page");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("refuses to follow a redirect off libgen.li at any step", async () => {
+    const originalFetch = globalThis.fetch;
+    const metadataUrl = "http://169.254.169.254/latest/meta-data/";
+    const godan: BookResult = {
+      id: "5cd226ba3a3b1e02cdcd58ef2618d6d1",
+      provider: "libgen",
+      title: "Godan",
+      authors: [],
+      format: "epub",
+      mirrors: [{ id: "x", label: "LibGen", kind: "direct", url: "https://libgen.li/ads.php?md5=5cd226ba3a3b1e02cdcd58ef2618d6d1" }],
+    };
+    try {
+      for (const step of ["/index.php", "/ads.php", "/get.php"]) {
+        const requested = mockFetchFollowingRedirects((url) => {
+          if (url === metadataUrl) return new Response("secret");
+          if (url.includes(step)) return redirectResponse(metadataUrl);
+          return new Response('<a href="get.php?md5=5cd226ba3a3b1e02cdcd58ef2618d6d1&key=ABC123">dl</a>');
+        });
+        const provider = new LibgenProvider();
+        const attempt = step === "/index.php" ? provider.search({ title: "Godan" }) : provider.acquire(godan);
+        await expect(attempt).rejects.toThrow("redirected to an untrusted destination");
+        expect(requested).not.toContain(metadataUrl);
+      }
     } finally {
       globalThis.fetch = originalFetch;
     }

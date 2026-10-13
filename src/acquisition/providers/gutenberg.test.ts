@@ -1,5 +1,7 @@
 import { describe, expect, it, mock } from "bun:test";
+import type { BookResult } from "../types";
 import { GutenbergProvider } from "./gutenberg";
+import { mockFetchFollowingRedirects, redirectResponse } from "./testSupport";
 
 describe("GutenbergProvider", () => {
   const gutendexBody = {
@@ -43,5 +45,44 @@ describe("GutenbergProvider", () => {
         mirrors: [{ id: "1", label: "evil", kind: "direct", url: "https://evil.example.com/x.epub" }],
       }),
     ).rejects.toThrow("Invalid download destination");
+  });
+
+  const downloadUrl = "https://www.gutenberg.org/ebooks/1342.epub.images";
+  const prideAndPrejudice: BookResult = {
+    id: "1342",
+    provider: "gutenberg",
+    title: "Pride and Prejudice",
+    authors: [],
+    format: "epub",
+    mirrors: [{ id: "1342", label: "Project Gutenberg", kind: "direct", url: downloadUrl }],
+  };
+
+  it("follows Gutenberg's redirect to its own EPUB cache", async () => {
+    const originalFetch = globalThis.fetch;
+    const cacheUrl = "https://www.gutenberg.org/cache/epub/1342/pg1342-images.epub";
+    const epub = Buffer.from("PK\x03\x04pride-and-prejudice");
+    mockFetchFollowingRedirects((url) => (url === downloadUrl ? redirectResponse(cacheUrl) : new Response(new Uint8Array(epub))));
+    try {
+      const acquired = await new GutenbergProvider().acquire(prideAndPrejudice);
+      expect(Buffer.from(await new Response(acquired.stream).arrayBuffer())).toEqual(epub);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("refuses to follow a search or download redirect off the Gutenberg hosts", async () => {
+    const originalFetch = globalThis.fetch;
+    const metadataUrl = "http://169.254.169.254/latest/meta-data/";
+    const requested = mockFetchFollowingRedirects((url) => (url === metadataUrl ? new Response("{}") : redirectResponse(metadataUrl)));
+    try {
+      const provider = new GutenbergProvider();
+      await expect(provider.search({ title: "Pride and Prejudice" })).rejects.toThrow(
+        "Gutendex search redirected to an untrusted destination",
+      );
+      await expect(provider.acquire(prideAndPrejudice)).rejects.toThrow("gutenberg download redirected to an untrusted destination");
+      expect(requested).not.toContain(metadataUrl);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

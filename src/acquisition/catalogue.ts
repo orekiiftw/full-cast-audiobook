@@ -98,7 +98,8 @@ function mapCandidates(hits: CatalogueHit[]): TorrentCandidate[] {
   const seen = new Set<string>();
   for (const hit of hits) {
     const hash = hit.infohash?.toLowerCase() ?? "";
-    if (!hash || !hit.md5) continue;
+    const md5 = catalogueMd5(hit.md5);
+    if (!hash || !md5) continue;
     if (seen.has(hash)) continue;
     seen.add(hash);
     candidates.push({
@@ -110,9 +111,13 @@ function mapCandidates(hits: CatalogueHit[]): TorrentCandidate[] {
       source: "catalogue",
       cached: null,
       alive: null,
-      md5: hit.md5,
+      md5,
       ipfs_cid: hit.ipfs_cid ?? undefined,
     });
   }
   return candidates;
+}
+
+function catalogueMd5(value: unknown): string | undefined {
+  return typeof value === "string" && /^[a-f0-9]{32}$/i.test(value) ? value.toLowerCase() : undefined;
 }

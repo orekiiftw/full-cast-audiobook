@@ -1,7 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it, mock } from "bun:test";
 import { strToU8, zipSync } from "fflate";
+import { TORRENT } from "../../lib/constants";
 import { fetchEpubFromArchiveOrg } from "./archiveOrg";
+import { fetchEpubFromGutenberg } from "./gutenberg";
 
 describe("fetchEpubFromArchiveOrg content verification", () => {
   it("skips an item whose OCR destroyed the script its metadata claims", async () => {
@@ -70,6 +72,58 @@ describe("fetchEpubFromArchiveOrg content verification", () => {
     try {
       const acquired = await fetchEpubFromArchiveOrg("The Time Machine", "Wells", () => {});
       expect(acquired!.filename).toBe("english-item.epub");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe("fallback acquisition size cap", () => {
+  const downloadUrl = "https://www.gutenberg.org/ebooks/1.epub.images";
+
+  function mockGutenbergDownload(download: () => Response): void {
+    globalThis.fetch = mock(async (url: string | URL | Request) => {
+      const u = url.toString();
+      if (u.startsWith("https://gutendex.com/")) {
+        return new Response(
+          JSON.stringify({ results: [{ id: 1, title: "Oversized", languages: ["en"], formats: { "application/epub+zip": downloadUrl } }] }),
+        );
+      }
+      if (u === downloadUrl) return download();
+      return new Response("Not found", { status: 404 });
+    }) as unknown as typeof fetch;
+  }
+
+  it("rejects a download whose declared size exceeds the cap", async () => {
+    const originalFetch = globalThis.fetch;
+    const epub = createFallbackTestEpub("oversized", "The morning light filtered through the ancient forest onto the mossy path below.");
+    mockGutenbergDownload(
+      () => new Response(new Uint8Array(epub), { headers: { "content-length": String(TORRENT.MAX_FILE_SIZE_BYTES + 1) } }),
+    );
+    try {
+      expect(await fetchEpubFromGutenberg("Oversized", undefined, () => {})).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("stops reading a download that streams past the cap", async () => {
+    const originalFetch = globalThis.fetch;
+    const oversized = new Uint8Array(TORRENT.MAX_FILE_SIZE_BYTES + 1);
+    oversized.set([0x50, 0x4b, 0x03, 0x04]);
+    mockGutenbergDownload(
+      () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(oversized);
+              controller.close();
+            },
+          }),
+        ),
+    );
+    try {
+      expect(await fetchEpubFromGutenberg("Oversized", undefined, () => {})).toBeNull();
     } finally {
       globalThis.fetch = originalFetch;
     }

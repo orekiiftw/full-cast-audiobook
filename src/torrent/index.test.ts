@@ -188,4 +188,20 @@ describe("downloadBookFromCandidates IPFS fallback", () => {
     ]);
     expect(result.buffer).toEqual(ZIP_BUFFER);
   });
+
+  test("keeps trying the remaining candidates when CATALOGUE_BASE_URL is malformed", async () => {
+    process.env.TORBOX_API_KEY = "test-key";
+    process.env.CATALOGUE_BASE_URL = "not a url";
+    const { torrentAdds } = mockTorBoxDownloadFetch();
+    const coldWithIpfs = torrentCandidate({ name: "cold edition", source: "catalogue", cached: false, alive: false, ipfs_cid: VALID_CID });
+    const healthy = torrentCandidate({
+      name: "healthy edition",
+      alive: true,
+      hash: "e".repeat(40),
+      magnet: `magnet:?xt=urn:btih:${"e".repeat(40)}`,
+    });
+
+    await expect(downloadBookFromCandidates([coldWithIpfs, healthy])).rejects.toThrow("All 2 torrent candidate(s)");
+    expect(torrentAdds).toHaveLength(1);
+  });
 });

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { TORRENT } from "../lib/constants";
 import { sleep } from "../lib/async";
 import { fetchWithRedirectGuard, redirectFailureMessage, type RedirectGuard } from "../lib/redirectGuard";
@@ -31,7 +32,11 @@ const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
 
 const MAX_REDIRECT_HOPS = 5;
 
-export async function readVerifiedBook(response: Response, filename: string): Promise<{ buffer: Buffer; filename: string }> {
+export async function readVerifiedBook(
+  response: Response,
+  filename: string,
+  expectedMd5?: string,
+): Promise<{ buffer: Buffer; filename: string }> {
   if (Number(response.headers.get("content-length") ?? 0) > TORRENT.MAX_FILE_SIZE_BYTES)
     throw new Error("The target book file exceeds the 200MB size limit.");
   if (!response.body) throw new Error("Empty response body from CDN.");
@@ -40,14 +45,14 @@ export async function readVerifiedBook(response: Response, filename: string): Pr
     TORRENT.MAX_FILE_SIZE_BYTES,
     () => new Error("The downloaded file exceeds the 200MB size limit."),
   );
-  verifyBookBuffer(buffer, filename);
+  verifyBookBuffer(buffer, filename, expectedMd5);
   return { buffer, filename };
 }
 
 export function selectTorrentFile(files: FileRow[] | undefined, expectedMd5?: string): FileRow | undefined {
   const list = files ?? [];
-  if (expectedMd5 != null) {
-    const wantedMd5 = expectedMd5.toLowerCase();
+  const wantedMd5 = normalizeMd5(expectedMd5);
+  if (wantedMd5) {
     const md5Match =
       list.find((file) => fileLabel(file).includes(wantedMd5)) ??
       list.find((file) =>
@@ -89,11 +94,19 @@ async function fetchWithValidatedRedirects(url: string): Promise<Response> {
   return fetchWithRedirectGuard({ url, timeoutMs: DOWNLOAD_TIMEOUT_MS, guard: cdnRedirectGuard() });
 }
 
-function verifyBookBuffer(buffer: Buffer, filename: string): void {
+function verifyBookBuffer(buffer: Buffer, filename: string, expectedMd5?: string): void {
   const isPdf = filename.toLowerCase().endsWith(".pdf") || buffer.toString("binary", 0, 4) === "%PDF";
   if (isPdf)
     throw new Error("PDF format detected. Only EPUB ebooks are supported to guarantee high-quality layout and multi-voice generation.");
   if (!isZipBuffer(buffer)) throw new Error("The file is corrupted or is not a valid EPUB zip archive.");
+  const wantedMd5 = normalizeMd5(expectedMd5);
+  if (wantedMd5 && createHash("md5").update(buffer).digest("hex") !== wantedMd5)
+    throw new Error(`The downloaded file does not match the expected md5 ${wantedMd5}.`);
+}
+
+function normalizeMd5(md5: string | undefined): string | undefined {
+  const normalized = md5?.toLowerCase();
+  return normalized && /^[a-f0-9]{32}$/.test(normalized) ? normalized : undefined;
 }
 
 function fileLabel(file: FileRow): string {
@@ -196,11 +209,15 @@ async function requestDownloadLink(torrentId: number, fileId: number, apiKey: st
   return downloadUrl;
 }
 
-async function downloadTorrentFile(downloadUrl: string, filename: string): Promise<{ buffer: Buffer; filename: string }> {
+async function downloadTorrentFile(
+  downloadUrl: string,
+  filename: string,
+  expectedMd5: string | undefined,
+): Promise<{ buffer: Buffer; filename: string }> {
   const safeDownloadUrl = await assertSafeDownloadUrlDns(downloadUrl);
   const fileResponse = await fetchWithValidatedRedirects(safeDownloadUrl);
   if (!fileResponse.ok) throw new Error(`Failed to download file from CDN: ${fileResponse.statusText}`);
-  return readVerifiedBook(fileResponse, filename);
+  return readVerifiedBook(fileResponse, filename, expectedMd5);
 }
 
 async function attemptDownload(
@@ -226,6 +243,6 @@ async function attemptDownload(
   const filename = target.short_name || target.name || "book.epub";
   onProgress?.(`Requesting download link for: ${filename}...`);
   const downloadUrl = await requestDownloadLink(torrentId, target.id, apiKey);
-  const book = await downloadTorrentFile(downloadUrl, filename);
+  const book = await downloadTorrentFile(downloadUrl, filename, options.expectedMd5);
   return { ok: true, buffer: book.buffer, filename: book.filename };
 }
