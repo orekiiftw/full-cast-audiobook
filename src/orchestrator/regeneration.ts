@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import { chapters, segments } from "../schema";
 import { annotateSegment, extractBeats } from "../narration/annotation";
@@ -6,7 +6,7 @@ import { synthesizeSegmentAudio } from "../narration/voiceSegment";
 import { getBookVoiceContext } from "../narration/voiceContext";
 import { uploadFile } from "../storage/r2";
 import { segmentAudioKey } from "../storage/keys";
-import { acquireLock, releaseLock, emitProgressEvent, segmentJobId, segmentQueue } from "../queue";
+import { acquireLock, isLockHeld, releaseLock, emitProgressEvent, segmentJobId, segmentQueue } from "../queue";
 import { restitchChapterInBackground } from "./index";
 import { repairRegeneratedChapterCounters } from "./chapterCounters";
 import { audioUrl, versionedAudioUrl } from "../lib/audioUrl";
@@ -14,30 +14,58 @@ import { isChapterComplete, type ChapterCounters } from "../lib/chapterStatus";
 
 const REGENERATION_LOCK_TTL_MS = 5 * 60_000;
 
+const REGENERATION_COOLDOWN_MS = 15_000;
+
+type SegmentRow = typeof segments.$inferSelect;
+
+type SegmentStatus = SegmentRow["status"];
+
+// processing and annotated rows are mid-flight in a segment worker, which owns them until it finishes.
+const CLAIMABLE_STATUSES = new Set<SegmentStatus>(["pending", "queued", "failed", "voiced"]);
+
 export interface RegenerationTarget {
   segmentId: string;
-  segment: typeof segments.$inferSelect;
+  segment: SegmentRow;
   chapter: typeof chapters.$inferSelect;
   bookId: string;
 }
 
-type RegenerationResult = { ok: true; audioUrl: string } | { ok: false; error: string };
+type RegenerationResult = { ok: true; audioUrl: string } | { ok: false; reason: "busy" | "cooldown"; error: string };
+
+const SEGMENT_BUSY: RegenerationResult = {
+  ok: false,
+  reason: "busy",
+  error: "This segment is currently being processed. Try again shortly.",
+};
 
 export async function regenerateSegment(target: RegenerationTarget, instruction?: string): Promise<RegenerationResult> {
   const lockKey = `regen:${target.segmentId}`;
   const lockToken = await acquireLock(lockKey, REGENERATION_LOCK_TTL_MS);
   if (!lockToken) {
-    return { ok: false, error: "This segment is already being regenerated. Please wait for it to finish." };
+    return { ok: false, reason: "busy", error: "This segment is already being regenerated. Please wait for it to finish." };
   }
   try {
-    return await runRegeneration(target, instruction);
+    const cooldownKey = `regen-cooldown:${target.segmentId}`;
+    if (await isLockHeld(cooldownKey)) {
+      return { ok: false, reason: "cooldown", error: "This line was just regenerated. Wait a few seconds before trying again." };
+    }
+    const result = await runRegeneration(target, instruction);
+    if (result.ok) await startCooldown(cooldownKey);
+    return result;
   } finally {
     await releaseLock(lockKey, lockToken);
   }
 }
 
+async function startCooldown(cooldownKey: string): Promise<void> {
+  await acquireLock(cooldownKey, REGENERATION_COOLDOWN_MS).catch((err) =>
+    console.warn("⚠️ Failed to start the regeneration cooldown:", err.message),
+  );
+}
+
 async function runRegeneration(target: RegenerationTarget, instruction?: string): Promise<RegenerationResult> {
   const { segmentId, segment, chapter, bookId } = target;
+  if (!CLAIMABLE_STATUSES.has(segment.status)) return SEGMENT_BUSY;
 
   await segmentQueue.remove(segmentJobId(segmentId)).catch(() => {});
 
@@ -45,15 +73,18 @@ async function runRegeneration(target: RegenerationTarget, instruction?: string)
     message: `Regenerating segment ${segment.segmentIndex}...`,
   });
 
-  if (!(await claimSegment(segmentId))) {
-    return { ok: false, error: "This segment is currently being processed. Try again shortly." };
-  }
+  const claimedStatus = await claimSegment(segmentId, segment.status);
+  if (!claimedStatus) return SEGMENT_BUSY;
 
-  const { wav, durationMs } = await synthesizeRegeneratedAudio(target, instruction);
   const audioR2Key = segmentAudioKey(bookId, chapter.chapterIndex, segment.segmentIndex);
-  await uploadFile(audioR2Key, wav, "audio/wav");
-
-  await db.update(segments).set({ audioR2Key, durationMs, status: "voiced" }).where(eq(segments.id, segmentId));
+  let durationMs: number | null;
+  try {
+    durationMs = await replaceSegmentAudio(target, claimedStatus, audioR2Key, instruction);
+  } catch (error) {
+    await releaseClaim(segmentId, claimedStatus, segment.status);
+    throw error;
+  }
+  if (durationMs === null) return SEGMENT_BUSY;
 
   const counters = await repairRegeneratedChapterCounters(chapter.id, segment.status);
   if (counters) {
@@ -67,13 +98,42 @@ async function runRegeneration(target: RegenerationTarget, instruction?: string)
   return { ok: true, audioUrl: audioUrl(audioR2Key) };
 }
 
-async function claimSegment(segmentId: string): Promise<boolean> {
+// A voiced line keeps its status while it is re-performed, so it stays playable and the sweep never
+// requeues it as orphaned work for the worker to voice and count a second time.
+async function claimSegment(segmentId: string, previousStatus: SegmentStatus): Promise<SegmentStatus | null> {
+  const claimedStatus: SegmentStatus = previousStatus === "voiced" ? "voiced" : "processing";
   const claimed = await db
     .update(segments)
-    .set({ status: "processing" })
-    .where(and(eq(segments.id, segmentId), sql`${segments.status} != 'processing'`))
+    .set({ status: claimedStatus })
+    .where(and(eq(segments.id, segmentId), eq(segments.status, previousStatus)))
     .returning({ id: segments.id });
-  return claimed.length > 0;
+  return claimed.length > 0 ? claimedStatus : null;
+}
+
+async function replaceSegmentAudio(
+  target: RegenerationTarget,
+  claimedStatus: SegmentStatus,
+  audioR2Key: string,
+  instruction?: string,
+): Promise<number | null> {
+  const { wav, durationMs } = await synthesizeRegeneratedAudio(target, instruction);
+  await uploadFile(audioR2Key, wav, "audio/wav");
+
+  const published = await db
+    .update(segments)
+    .set({ audioR2Key, durationMs, status: "voiced" })
+    .where(and(eq(segments.id, target.segmentId), eq(segments.status, claimedStatus)))
+    .returning({ id: segments.id });
+  return published.length > 0 ? durationMs : null;
+}
+
+async function releaseClaim(segmentId: string, claimedStatus: SegmentStatus, previousStatus: SegmentStatus): Promise<void> {
+  if (claimedStatus !== "processing") return;
+  await db
+    .update(segments)
+    .set({ status: previousStatus })
+    .where(and(eq(segments.id, segmentId), eq(segments.status, "processing")))
+    .catch((err) => console.error(`Failed to restore segment ${segmentId} to ${previousStatus} after a failed regeneration:`, err));
 }
 
 async function synthesizeRegeneratedAudio(target: RegenerationTarget, instruction?: string) {
@@ -91,7 +151,7 @@ async function synthesizeRegeneratedAudio(target: RegenerationTarget, instructio
   });
 }
 
-async function resolveRegenerationBeats(segment: typeof segments.$inferSelect) {
+async function resolveRegenerationBeats(segment: SegmentRow) {
   const beats = extractBeats(segment.annotatedJson);
   if (beats.length > 0) return beats;
   return (await annotateSegment(segment.rawText, [], "Regenerating scene.")).beats;
@@ -100,7 +160,7 @@ async function resolveRegenerationBeats(segment: typeof segments.$inferSelect) {
 interface SegmentReadyPayload {
   bookId: string;
   chapter: typeof chapters.$inferSelect;
-  segment: typeof segments.$inferSelect;
+  segment: SegmentRow;
   audioR2Key: string;
   durationMs: number | null | undefined;
   counters: ChapterCounters;

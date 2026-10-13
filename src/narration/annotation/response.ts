@@ -35,18 +35,17 @@ export function parseAnnotationResponse(raw: string, fallbackText: string, fallb
 }
 
 export function beatsMatchSegment(beats: BeatAnnotation[], segmentText: string): boolean {
-  const voicedCore = coreText(
-    beats
-      .map((beat) => beat.text)
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim(),
-  );
-  return voicedCore === coreText(segmentText.replace(/\s+/g, " ").trim());
+  const segmentCore = coreText(segmentText);
+  if (!segmentCore) return false;
+  return coreText(beats.map((beat) => beat.text).join(" ")) === segmentCore;
 }
 
+// Combining marks stay: Indic, Thai and Arabic vowel signs are marks, so dropping them would hide edited words.
 function coreText(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return text
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}]/gu, "");
 }
 
 function normalizeAnnotation(parsed: unknown, fallbackText: string, fallbackSummary: string): AnnotationResult {

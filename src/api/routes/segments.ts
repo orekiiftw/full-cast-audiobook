@@ -2,16 +2,27 @@ import { json } from "../response";
 import { type RouteContext, type RouteTable } from "../route";
 import { ValidationError, optionalString, requireUuid } from "../../lib/validators";
 import { readJsonWithLimit } from "../body";
+import { createRateLimiter } from "../rateLimit";
 import { ownedSegment } from "../../books/ownership";
 import { regenerateSegment, type RegenerationTarget } from "../../orchestrator/regeneration";
 
 const MAX_INSTRUCTION_LENGTH = 500;
+
+const REGENERATION_WINDOW_MS = 15 * 60 * 1000;
+
+const REGENERATION_MAX_REQUESTS = 30;
+
+const regenerationRateLimited = createRateLimiter({ windowMs: REGENERATION_WINDOW_MS, maxAttempts: REGENERATION_MAX_REQUESTS });
 
 export const segmentRoutes: RouteTable = {
   "POST /api/segments/:segmentId/regenerate": handleSegmentRegeneration,
 };
 
 async function handleSegmentRegeneration({ req, user, params }: RouteContext): Promise<Response> {
+  if (regenerationRateLimited(user.id)) {
+    return json({ error: "Too many regeneration requests. Try again later." }, 429);
+  }
+
   const segmentId = requireUuid(params.segmentId, "segmentId");
   const body = (await readJsonWithLimit(req)) as Record<string, unknown>;
   const instruction = readInstruction(body);
@@ -22,7 +33,8 @@ async function handleSegmentRegeneration({ req, user, params }: RouteContext): P
   }
 
   const result = await regenerateSegment(target, instruction);
-  return result.ok ? json({ success: true, audioUrl: result.audioUrl }) : json({ error: result.error }, 409);
+  if (result.ok) return json({ success: true, audioUrl: result.audioUrl });
+  return json({ error: result.error }, result.reason === "cooldown" ? 429 : 409);
 }
 
 async function resolveRegenerationTarget(userId: string, segmentId: string): Promise<RegenerationTarget | null> {
