@@ -4,13 +4,14 @@ import { useSSE } from "../../hooks/useSSE";
 import {
   PROGRESS_LOG_LIMIT,
   applyPipelineEvent,
+  deriveInitialCues,
   isBookWorking,
   resumePositionFor,
   type DetailData,
   type ProgressLogEntry,
   type SegmentProgress,
 } from "./detailsData";
-import type { Book, CastMember, Chapter, PipelineEvent } from "../../types/api";
+import type { Book, CastMember, Chapter, PipelineEvent, PlaybackState } from "../../types/api";
 
 export interface BookDetailModel {
   loading: boolean;
@@ -19,6 +20,7 @@ export interface BookDetailModel {
   book: Book | null;
   chapters: Chapter[];
   pronunciation: DetailData["pronunciation"];
+  playbackState: PlaybackState | null;
   narrator: CastMember | null;
   isWorking: boolean;
   canRetry: boolean;
@@ -59,6 +61,12 @@ export function useBookDetail(bookId: string, onPlayChapter: (book: Book, chapte
         if (body.segmentProgress) {
           setSegmentProgress(body.segmentProgress);
         }
+        const initialCues = deriveInitialCues(body);
+        if (initialCues.length > 0) {
+          setProgressLog((prev) =>
+            prev.length > 0 ? prev : initialCues.slice(0, PROGRESS_LOG_LIMIT).map((text) => ({ id: ++logSeqRef.current, text })),
+          );
+        }
       } else if (response.status !== 401) {
         setLoadError(true);
       }
@@ -87,7 +95,7 @@ export function useBookDetail(bookId: string, onPlayChapter: (book: Book, chapte
     (chapter: Chapter) => {
       const current = dataRef.current;
       if (!current) return;
-      onPlayChapter(current.book, chapter, resumePositionFor(current.playbackState, chapter.id));
+      onPlayChapter(current.book, chapter, resumePositionFor(current.playbackState, chapter.id, chapter.durationMs));
     },
     [onPlayChapter],
   );
@@ -121,6 +129,7 @@ export function useBookDetail(bookId: string, onPlayChapter: (book: Book, chapte
     book,
     chapters: data?.chapters ?? [],
     pronunciation: data?.pronunciation ?? [],
+    playbackState: data?.playbackState ?? null,
     narrator,
     isWorking: book ? isBookWorking(book) : false,
     canRetry: !!(data?.canRetry || book?.epubR2Key),

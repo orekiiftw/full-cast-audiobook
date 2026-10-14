@@ -35,6 +35,7 @@ export function BookDetailView({ book, detail, preview, dictionary, maintenance,
         chapters={detail.chapters}
         pronunciationCount={detail.pronunciation.length}
         segmentProgress={detail.segmentProgress}
+        playbackState={detail.playbackState}
         activeChapterId={activeChapterId}
         canRetry={detail.canRetry}
         retrying={maintenance.retrying}

@@ -72,6 +72,18 @@ export function useSegmentPlayback({
     onChapterEnded?.();
   }, [onChapterEnded, refs, setCurrentSegmentIndex, setIsPlaying, setPositionMs]);
 
+  const { isPolling, clearPoll, startPollingForSegment } = useSegmentSync({
+    bookId,
+    chapterId,
+    refs,
+    setSegmentsList,
+    setCurrentIndex: setCurrentSegmentIndex,
+    setBufferingNext: setIsBufferingNext,
+    onChapterComplete: finishChapter,
+    loadSegmentSource,
+    getLoadedSegmentId,
+  });
+
   const handleSegmentEnded = useCallback(() => {
     const index = refs.currentIndex.current;
     const segments = refs.segments.current;
@@ -85,28 +97,43 @@ export function useSegmentPlayback({
 
     if (hasPendingLines(segments)) {
       refs.awaitingNext.current = true;
+      refs.isBufferingNext.current = true;
       setIsBufferingNext(true);
+      startPollingForSegment(segments[index]?.id ?? "");
       return;
     }
 
     finishChapter();
-  }, [finishChapter, refs, setCurrentSegmentIndex]);
-
-  const { isPolling, clearPoll, startPollingForSegment } = useSegmentSync({
-    bookId,
-    chapterId,
-    refs,
-    setSegmentsList,
-    setCurrentIndex: setCurrentSegmentIndex,
-    setBufferingNext: setIsBufferingNext,
-    onChapterComplete: finishChapter,
-    loadSegmentSource,
-    getLoadedSegmentId,
-  });
+  }, [finishChapter, refs, setCurrentSegmentIndex, startPollingForSegment]);
 
   useEffect(() => {
     const activeSegment = segmentsList[currentSegmentIndex];
     if (!activeSegment) return;
+
+    if (refs.awaitingNext.current) {
+      const next = findNextIndex(segmentsList, currentSegmentIndex);
+      if (next >= 0) {
+        refs.awaitingNext.current = false;
+        setCurrentSegmentIndex(next);
+      } else if (hasPendingLines(segmentsList)) {
+        if (!isPlaying) {
+          clearPoll();
+          if (refs.isBufferingNext.current) setIsBufferingNext(false);
+          refs.awaitingNext.current = false;
+          audio.pause();
+        } else if (!refs.isBufferingNext.current || !isPolling()) {
+          refs.isBufferingNext.current = true;
+          setIsBufferingNext(true);
+          startPollingForSegment(activeSegment.id);
+        }
+      } else {
+        clearPoll();
+        if (refs.isBufferingNext.current) setIsBufferingNext(false);
+        refs.awaitingNext.current = false;
+        if (isPlaying) finishChapter();
+      }
+      return;
+    }
 
     if (activeSegment.status === "failed") {
       const next = findNextIndex(segmentsList, currentSegmentIndex);
@@ -166,6 +193,7 @@ export function useSegmentPlayback({
     setCurrentSegmentIndex,
     isSegmentLoaded,
     loadSegmentSource,
+    finishChapter,
   ]);
 
   usePlaybackFollow({
@@ -188,7 +216,9 @@ export function useSegmentPlayback({
       return;
     }
     if (refs.isBufferingNext.current) {
+      clearPoll();
       refs.awaitingNext.current = false;
+      refs.isBufferingNext.current = false;
       setIsBufferingNext(false);
       setIsPlaying(false);
       audio.pause();
@@ -199,7 +229,7 @@ export function useSegmentPlayback({
       return;
     }
     setIsPlaying(false);
-  }, [audio, refs, setIsPlaying]);
+  }, [audio, clearPoll, refs, setIsPlaying]);
 
   const goToSegment = useCallback(
     (index: number) => {

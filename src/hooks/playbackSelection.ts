@@ -41,6 +41,8 @@ export function resolveStartSegmentIndex(segments: Segment[], resumeMs: number):
 export function findNextPlayableChapter(chapters: Chapter[], currentChapterIndex: number): Chapter | undefined {
   return chapters.find(
     (candidate) =>
-      candidate.chapterIndex > currentChapterIndex && candidate.voicedCount > 0 && PLAYABLE_CHAPTER_STATUSES.has(candidate.status),
+      candidate.chapterIndex > currentChapterIndex &&
+      candidate.status !== "failed" &&
+      (candidate.voicedCount > 0 || candidate.totalCount > 0 || PLAYABLE_CHAPTER_STATUSES.has(candidate.status)),
   );
 }

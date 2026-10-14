@@ -1,10 +1,10 @@
 import { Badge, Icon, Spinner, type IconName } from "../ui";
 import { BookCover } from "./BookCover";
 import { BookHeroActions } from "./BookHeroActions";
-import { isBookWorking, type SegmentProgress } from "./detailsData";
+import { findLiveChapter, isBookWorking, type SegmentProgress } from "./detailsData";
 import { bookStatusOf } from "../library/bookStatus";
 import { audioUrl } from "../../lib/audioUrl";
-import type { Book, BookStatus, CastMember, Chapter } from "../../types/api";
+import type { Book, BookStatus, CastMember, Chapter, PlaybackState } from "../../types/api";
 
 const WORKING_NOTES: Partial<Record<BookStatus, string>> = {
   discovering: "Finding a DRM-free copy and reading its chapters.",
@@ -18,6 +18,7 @@ interface BookHeroProps {
   chapters: Chapter[];
   pronunciationCount: number;
   segmentProgress: SegmentProgress;
+  playbackState?: PlaybackState | null;
   activeChapterId?: string;
   canRetry: boolean;
   retrying: boolean;
@@ -33,6 +34,7 @@ export function BookHero({
   chapters,
   pronunciationCount,
   segmentProgress,
+  playbackState,
   activeChapterId,
   canRetry,
   retrying,
@@ -41,7 +43,7 @@ export function BookHero({
   onRetry,
   onDelete,
 }: BookHeroProps) {
-  const liveChapter = findLiveChapter(chapters, segmentProgress);
+  const liveChapter = findLiveChapter(chapters, segmentProgress, playbackState);
   const status = bookStatusOf(book.status);
   const coverSrc = book.coverR2Key ? audioUrl(book.coverR2Key) : null;
   const workingNote = isBookWorking(book) ? WORKING_NOTES[book.status] : undefined;
@@ -136,17 +138,4 @@ function totalRuntime(chapters: Chapter[]): string | null {
   const minutes = totalMinutes % 60;
   if (hours === 0) return `${minutes} min`;
   return minutes === 0 ? `${hours} h` : `${hours} h ${minutes} min`;
-}
-
-function findLiveChapter(chapters: Chapter[], segmentProgress: SegmentProgress): Chapter | undefined {
-  const partial = chapters.find((chapter) => chapter.status === "partial_ready");
-  if (partial) return partial;
-
-  const ready = chapters.find((chapter) => chapter.status === "ready");
-  if (ready) return ready;
-
-  return chapters.find((chapter) => {
-    const progress = segmentProgress[chapter.id];
-    return (chapter.status === "processing" || chapter.status === "queued") && !!progress && progress.done > 0;
-  });
 }

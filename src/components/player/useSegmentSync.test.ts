@@ -16,6 +16,8 @@ mock.module("../../hooks/useSSE", () => ({
 }));
 
 import { renderHookOnServer } from "./testSupport";
+import type { AudioTransport } from "./useAudioTransport";
+import { useSegmentPlayback } from "./useSegmentPlayback";
 import { useSegmentSync, type SegmentPlaybackRefs } from "./useSegmentSync";
 
 const BOOK_ID = "book-1";
@@ -127,5 +129,83 @@ describe("useSegmentSync refresh ordering", () => {
     await Bun.sleep(5);
 
     expect(refs.segments.current[1]).toEqual(VOICED_LINE_2);
+  });
+
+  it("immediately polls with ?at=<segmentIndex> when buffering starts on a pending segment", async () => {
+    const requestedUrls: string[] = [];
+    globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+      requestedUrls.push(typeof input === "string" ? input : input.toString());
+      return Response.json({ segments: [VOICED_LINE_1, PENDING_LINE_2] });
+    }) as unknown as typeof fetch;
+
+    const refs: SegmentPlaybackRefs = {
+      segments: { current: [VOICED_LINE_1, PENDING_LINE_2] },
+      currentIndex: { current: 1 },
+      isPlaying: { current: true },
+      awaitingNext: { current: false },
+      isBufferingNext: { current: true },
+    };
+    const sync = renderHookOnServer(() =>
+      useSegmentSync({
+        bookId: BOOK_ID,
+        chapterId: CHAPTER_ID,
+        refs,
+        setSegmentsList: (next) => {
+          refs.segments.current = next;
+        },
+        setCurrentIndex: () => {},
+        setBufferingNext: () => {},
+        onChapterComplete: () => {},
+        loadSegmentSource: () => {},
+        getLoadedSegmentId: () => null,
+      }),
+    );
+
+    sync.startPollingForSegment(PENDING_LINE_2.id);
+    sync.clearPoll();
+    await Bun.sleep(5);
+
+    expect(requestedUrls).toEqual([`/api/chapters/${CHAPTER_ID}/segments?at=2`]);
+  });
+
+  it("starts polling with ?at=<currentSegmentIndex> when the final segment ends while an earlier line is still pending", async () => {
+    const PENDING_LINE_1 = seg("s1", { segmentIndex: 1, status: "pending", audioUrl: null, durationMs: null });
+    const requestedUrls: string[] = [];
+    globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+      requestedUrls.push(typeof input === "string" ? input : input.toString());
+      return Response.json({ segments: [PENDING_LINE_1, VOICED_LINE_2] });
+    }) as unknown as typeof fetch;
+
+    const stubAudio: AudioTransport = {
+      loadAndPlay: async () => true,
+      play: async () => true,
+      pause: () => {},
+      seekTo: () => {},
+      getCurrentTime: () => 0,
+      isActuallyPaused: () => true,
+      setPlaybackRate: () => {},
+    };
+
+    const playback = renderHookOnServer(() =>
+      useSegmentPlayback({
+        bookId: BOOK_ID,
+        chapterId: CHAPTER_ID,
+        segmentsList: [PENDING_LINE_1, VOICED_LINE_2],
+        setSegmentsList: () => {},
+        currentSegmentIndex: 1,
+        setCurrentSegmentIndex: () => {},
+        isPlaying: true,
+        setIsPlaying: () => {},
+        initialPositionMs: 0,
+        setPositionMs: () => {},
+        audio: stubAudio,
+      }),
+    );
+
+    playback.handleSegmentEnded();
+    await Bun.sleep(5);
+    playback.togglePlayPause();
+
+    expect(requestedUrls).toEqual([`/api/chapters/${CHAPTER_ID}/segments?at=2`]);
   });
 });

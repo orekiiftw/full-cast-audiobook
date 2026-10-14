@@ -47,16 +47,6 @@ export function usePlaybackSession(showToast: ShowToast): PlaybackSession {
   const segmentIndexRef = useRef(1);
   const latestRef = useRef<LatestPlayback>({ book: null, chapter: null, segmentIndex: 1 });
 
-  useEffect(() => {
-    const segment = activeSegmentsList[activeSegmentIndex];
-    if (segment) segmentIndexRef.current = segment.segmentIndex;
-    latestRef.current = {
-      book: activeBook,
-      chapter: activeChapter,
-      segmentIndex: segment ? segment.segmentIndex : latestRef.current.segmentIndex,
-    };
-  }, [activeBook, activeChapter, activeSegmentIndex, activeSegmentsList]);
-
   const syncPosition = usePlaybackProgressSync({
     targetRef: progressTargetRef,
     positionRef,
@@ -65,13 +55,27 @@ export function usePlaybackSession(showToast: ShowToast): PlaybackSession {
     activeChapterId: activeChapter?.id ?? null,
   });
 
+  useEffect(() => {
+    const segment = activeSegmentsList[activeSegmentIndex];
+    if (segment && segment.segmentIndex !== segmentIndexRef.current) {
+      segmentIndexRef.current = segment.segmentIndex;
+      syncPosition();
+    }
+    latestRef.current = {
+      book: activeBook,
+      chapter: activeChapter,
+      segmentIndex: segment ? segment.segmentIndex : latestRef.current.segmentIndex,
+    };
+  }, [activeBook, activeChapter, activeSegmentIndex, activeSegmentsList, syncPosition]);
+
   const playChapter = useCallback(
     async (book: Book, chapter: Chapter, resumeMs = 0) => {
       const requestId = ++playRequestRef.current;
       let segments: Segment[];
+      const anchorAtStart = resumeMs <= 0 ? 1 : undefined;
 
       try {
-        segments = await loadChapterSegments(chapter.id, unlockSharedAudio());
+        segments = await loadChapterSegments(chapter.id, unlockSharedAudio(), anchorAtStart);
       } catch (error) {
         if (requestId !== playRequestRef.current) return;
         console.error(error);
@@ -95,6 +99,7 @@ export function usePlaybackSession(showToast: ShowToast): PlaybackSession {
       // A chapter switch runs the sync interval's cleanup, already targeting this chapter, before the
       // effect above updates the ref; a stale line index there would anchor voicing at the wrong line.
       segmentIndexRef.current = segments[startIndex].segmentIndex;
+      syncPosition();
 
       setActiveBook(book);
       setActiveChapter(chapter);
@@ -141,8 +146,9 @@ export function usePlaybackSession(showToast: ShowToast): PlaybackSession {
   };
 }
 
-async function loadChapterSegments(chapterId: string, audioUnlocked: Promise<void>): Promise<Segment[]> {
-  const [response] = await Promise.all([apiFetch(`/api/chapters/${chapterId}/segments`), audioUnlocked]);
+async function loadChapterSegments(chapterId: string, audioUnlocked: Promise<void>, anchorSegmentIndex?: number): Promise<Segment[]> {
+  const query = anchorSegmentIndex !== undefined ? `?at=${anchorSegmentIndex}` : "";
+  const [response] = await Promise.all([apiFetch(`/api/chapters/${chapterId}/segments${query}`), audioUnlocked]);
   if (!response.ok) throw new Error("Failed to load chapter segments");
 
   const data = (await response.json()) as { segments?: Segment[] };

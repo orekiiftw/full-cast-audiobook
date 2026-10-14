@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { apiFetch } from "../../lib/api";
 import { applySegmentReady } from "../../lib/segmentPatch";
-import { isPlayableSegment } from "../../lib/segmentStatus";
+import { isPendingStatus, isPlayableSegment } from "../../lib/segmentStatus";
 import type { PipelineEvent, Segment, SegmentReadyEvent } from "../../types/api";
 import { useSSE } from "../../hooks/useSSE";
 import { findNextIndex, hasPendingLines } from "./playbackMath";
@@ -138,7 +138,9 @@ export function useSegmentSync({
   const startPollingForSegment = useCallback(
     (segmentId: string) => {
       clearPoll();
-      pollIntervalRef.current = setInterval(async () => {
+      refs.isBufferingNext.current = true;
+
+      const pollOnce = async () => {
         if (pollInFlightRef.current) return;
         pollInFlightRef.current = true;
         try {
@@ -159,6 +161,11 @@ export function useSegmentSync({
         } finally {
           pollInFlightRef.current = false;
         }
+      };
+
+      void pollOnce();
+      pollIntervalRef.current = setInterval(() => {
+        void pollOnce();
       }, POLL_INTERVAL_MS);
     },
     [advanceFromFreshSegments, clearPoll, loadSegmentSource, refs, refreshSegments, setBufferingNext],
@@ -228,5 +235,10 @@ export function useSegmentSync({
 // line follows in this chapter, anchoring on the current one opens the start of the next chapter.
 function findWaitedSegmentIndex(refs: SegmentPlaybackRefs): number | null {
   if (!refs.isBufferingNext.current && !refs.awaitingNext.current) return null;
+  if (refs.awaitingNext.current) {
+    const currentIdx = refs.currentIndex.current;
+    const nextPending = refs.segments.current.find((segment, idx) => idx > currentIdx && isPendingStatus(segment.status));
+    if (nextPending) return nextPending.segmentIndex;
+  }
   return refs.segments.current[refs.currentIndex.current]?.segmentIndex ?? null;
 }
