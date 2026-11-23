@@ -1,19 +1,18 @@
+import { useMemo } from "react";
 import { StyleSheet, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import type { Chapter } from "@/api/types";
-import { AppText, Badge, Button, CoverArt, Eyebrow, LevelMeter, Notice, Screen, Spinner } from "@/components/ui";
+import { AppText, Badge, Button, CoverArt, Notice, Screen, SkeletonBlock } from "@/components/ui";
+import { FadeUp } from "@/components/ui/motion";
+import { StagingPanel } from "@/components/staging/StagingPanel";
 import { formatCount } from "@/lib/format";
+import { tapHaptic } from "@/lib/haptics";
+import { stagingFromDetail } from "@/lib/addStage";
 import { findLiveChapter, isBookWorking } from "@/playback/detailsData";
 import type { BookDetailModel } from "@/hooks/useBookDetail";
 import { colors, radius } from "@/theme/tokens";
 import { bookStatusOf } from "../library/bookStatus";
 import { ChapterRow } from "./ChapterRow";
-
-const WORKING_NOTES: Record<string, string> = {
-  discovering: "Finding a DRM-free copy and reading its chapters.",
-  casting: "Casting the narrator and preparing the first chapter.",
-  in_progress: "Performing chapter by chapter. You can listen as lines finish.",
-};
 
 interface BookDetailViewProps {
   detail: BookDetailModel;
@@ -26,16 +25,26 @@ interface BookDetailViewProps {
 
 export function BookDetailView({ detail, activeChapterId, onBack, onPlayChapter, onDelete, dock }: BookDetailViewProps) {
   const { book, chapters, loading, loadError, notFound, state } = detail;
+  const staging = useMemo(() => stagingFromDetail(state), [state]);
 
   if (loading) {
     return (
       <Screen>
         <BackLink onBack={onBack} />
-        <View style={styles.center}>
-          <Spinner size={24} />
-          <AppText variant="caption" tone="tertiary">
-            Loading the performance…
-          </AppText>
+        <View style={styles.hero}>
+          <SkeletonBlock style={styles.skeletonCover} borderRadius={radius.control} />
+          <View style={styles.heroCopy}>
+            <SkeletonBlock style={{ width: 80, height: 20, borderRadius: 999 }} />
+            <SkeletonBlock style={{ width: "90%", height: 24 }} />
+            <SkeletonBlock style={{ width: "60%", height: 16 }} />
+            <SkeletonBlock style={{ width: "40%", height: 12 }} />
+          </View>
+        </View>
+        <SkeletonBlock style={{ width: "100%", height: 148, borderRadius: radius.panel }} />
+        <View style={styles.chapters}>
+          {[0, 1, 2].map((index) => (
+            <SkeletonBlock key={index} style={{ width: "100%", height: 68, borderRadius: radius.tile }} />
+          ))}
         </View>
       </Screen>
     );
@@ -45,7 +54,11 @@ export function BookDetailView({ detail, activeChapterId, onBack, onPlayChapter,
     return (
       <Screen>
         <BackLink onBack={onBack} />
-        <Notice tone="error" message={notFound ? "This book may have been removed." : (loadError ?? "Could not load this book.")} />
+        <Notice
+          tone="error"
+          title={notFound ? "This book is gone" : "Couldn't load the performance"}
+          message={notFound ? "It may have been removed from your library." : (loadError ?? "Could not load this book.")}
+        />
         <Button label="Try again" variant="secondary" onPress={() => void detail.reload()} style={styles.retry} />
       </Screen>
     );
@@ -56,7 +69,12 @@ export function BookDetailView({ detail, activeChapterId, onBack, onPlayChapter,
   const working = isBookWorking(book);
   const narrator = state.data?.cast.find((member) => member.name.toLowerCase() === "narrator") ?? state.data?.cast[0];
   const resumeMs = liveChapter ? detail.resumeMsFor(liveChapter) : 0;
-  const log = state.log.slice(0, 6);
+  const readyChapters = chapters.filter((chapter) => chapter.status === "ready").length;
+
+  const play = (chapter: Chapter) => {
+    tapHaptic();
+    onPlayChapter(chapter);
+  };
 
   return (
     <Screen>
@@ -80,63 +98,48 @@ export function BookDetailView({ detail, activeChapterId, onBack, onPlayChapter,
         </View>
       </View>
 
-      {working ? (
-        <View style={styles.workingNote}>
-          <LevelMeter height={12} />
-          <AppText variant="caption" tone="secondary">
-            {WORKING_NOTES[book.status] ?? "Working…"}
-          </AppText>
-        </View>
-      ) : null}
-
       <View style={styles.actions}>
         {liveChapter ? (
           <Button
             label={resumeMs > 0 ? `Continue · ${liveChapter.title}` : `Play · ${liveChapter.title}`}
             icon="play"
             size="lg"
-            onPress={() => onPlayChapter(liveChapter)}
+            onPress={() => play(liveChapter)}
             style={styles.flexButton}
           />
         ) : (
           <Button label="Waiting for the first lines" icon="clock" size="lg" disabled onPress={() => undefined} style={styles.flexButton} />
         )}
-        {book.status === "failed" ? (
-          <Button label="Retry" variant="secondary" icon="refresh-cw" onPress={() => void detail.retry()} loading={detail.retrying} />
-        ) : null}
         <Button label="Delete" variant="ghost" icon="trash-2" onPress={onDelete} />
       </View>
 
-      {working && log.length > 0 ? (
-        <View style={styles.console}>
-          <View style={styles.consoleHead}>
-            <Eyebrow>Studio console</Eyebrow>
-            <LevelMeter height={10} />
-          </View>
-          {log.map((entry, index) => (
-            <AppText key={entry.id} variant="caption" tone={index === 0 ? "secondary" : "tertiary"} style={styles.consoleLine}>
-              {entry.text}
-            </AppText>
-          ))}
-        </View>
+      {working || book.status === "failed" ? (
+        <StagingPanel
+          staging={staging}
+          onRetry={() => void detail.retry()}
+          retrying={detail.retrying}
+          maxLogLines={8}
+          style={styles.console}
+        />
       ) : null}
 
       <View style={styles.chapterHeader}>
         <AppText variant="titleLg">Chapters</AppText>
         <AppText variant="caption" tone="tertiary">
-          {chapters.filter((chapter) => chapter.status === "ready").length} of {chapters.length} fully voiced
+          {readyChapters} of {chapters.length} fully voiced
         </AppText>
       </View>
 
       <View style={styles.chapters}>
-        {chapters.map((chapter) => (
-          <ChapterRow
-            key={chapter.id}
-            chapter={chapter}
-            progress={state.segmentProgress[chapter.id]}
-            isActive={chapter.id === activeChapterId}
-            onSelect={onPlayChapter}
-          />
+        {chapters.map((chapter, index) => (
+          <FadeUp key={chapter.id} index={index} step={35}>
+            <ChapterRow
+              chapter={chapter}
+              progress={state.segmentProgress[chapter.id]}
+              isActive={chapter.id === activeChapterId}
+              onSelect={play}
+            />
+          </FadeUp>
         ))}
       </View>
 
@@ -162,27 +165,16 @@ function MetaItem({ icon, label }: { icon: keyof typeof Feather.glyphMap; label:
 
 const styles = StyleSheet.create({
   back: { alignSelf: "flex-start", marginTop: 12, marginBottom: 8 },
-  center: { alignItems: "center", gap: 12, paddingVertical: 64 },
   retry: { marginTop: 12 },
   hero: { flexDirection: "row", gap: 16, marginBottom: 20 },
   heroCopy: { flex: 1, gap: 8, justifyContent: "center" },
   title: { fontSize: 26, lineHeight: 30 },
   metaList: { flexDirection: "row", flexWrap: "wrap", gap: 12, marginTop: 2 },
   metaItem: { flexDirection: "row", alignItems: "center", gap: 5 },
-  workingNote: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 16 },
+  skeletonCover: { width: 124, height: 186 },
   actions: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 20 },
   flexButton: { flexGrow: 1 },
-  console: {
-    borderRadius: radius.tile,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line.hairline,
-    backgroundColor: colors.surface[1],
-    padding: 14,
-    gap: 6,
-    marginBottom: 24,
-  },
-  consoleHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 2 },
-  consoleLine: { fontVariant: ["tabular-nums"] },
+  console: { marginBottom: 24 },
   chapterHeader: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", marginBottom: 12 },
   chapters: { gap: 8 },
 });

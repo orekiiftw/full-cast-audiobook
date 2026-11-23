@@ -23,7 +23,8 @@ export default function LibraryScreen() {
     showToast(removed ? `Deleted “${book.title}”.` : "Could not delete this book.", removed ? "info" : "error");
   };
 
-  const handleAdded = (book: Book) => {
+  // The sheet narrates the add; this is the hand-off once the studio has something to play.
+  const handleOpenBook = (book: Book) => {
     setSheetOpen(false);
     showToast(addBookToast(book));
     void library.reload();
@@ -35,16 +36,18 @@ export default function LibraryScreen() {
       <LibraryView
         books={library.books}
         loading={library.loading}
+        refreshing={library.refreshing}
         error={library.error}
         signedInAs={user?.email ?? null}
         onRetry={() => void library.reload()}
+        onRefresh={() => void library.refresh()}
         onAddBook={() => setSheetOpen(true)}
         onSelectBook={(book) => router.push(`/book/${book.id}`)}
         onDeleteBook={(book) => void handleDelete(book)}
         onSignOut={() => void signOut()}
         dock={<PlayerDock />}
       />
-      <AddBookSheet visible={sheetOpen} model={addBook} onClose={() => setSheetOpen(false)} onAdded={handleAdded} />
+      <AddBookSheet visible={sheetOpen} model={addBook} onClose={() => setSheetOpen(false)} onOpenBook={handleOpenBook} />
     </>
   );
 }

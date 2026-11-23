@@ -1,23 +1,30 @@
 import { useCallback, useState } from "react";
-import { ApiError } from "@/api/client";
 import { searchBooks, submitBook } from "@/api/books";
 import type { Book, BookResult } from "@/api/types";
+import { describeAddFailure, describeSearchFailure, type SearchFailure } from "@/lib/searchFeedback";
 
 // Search → pick → submit, the flow the web client's Add Book modal offers for titles it has
 // to acquire rather than upload. The mobile app deliberately stops here: no EPUB picker, no
-// magnet field.
+// magnet field. Picking a result hands back the book row; narrating what happens next is the
+// staging panel's job (`useBookStaging`).
 export interface AddBookModel {
   title: string;
   author: string;
   results: BookResult[] | null;
   searching: boolean;
   submittingId: string | null;
-  error: string | null;
+  failure: SearchFailure | null;
+  // The server answers inside a budget and names the providers still working; null when the
+  // answer was complete.
+  pending: string[] | null;
+  providers: string[] | null;
+  searched: boolean;
   setTitle: (value: string) => void;
   setAuthor: (value: string) => void;
   search: () => Promise<void>;
   addResult: (result: BookResult) => Promise<Book | null>;
   addManual: () => Promise<Book | null>;
+  reset: () => void;
 }
 
 export function useAddBook(): AddBookModel {
@@ -26,34 +33,34 @@ export function useAddBook(): AddBookModel {
   const [results, setResults] = useState<BookResult[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<SearchFailure | null>(null);
+  const [pending, setPending] = useState<string[] | null>(null);
+  const [providers, setProviders] = useState<string[] | null>(null);
+  const [searched, setSearched] = useState(false);
 
   const search = useCallback(async () => {
     const trimmedTitle = title.trim();
     const trimmedAuthor = author.trim();
     if (!trimmedTitle && !trimmedAuthor) {
-      setError("Enter a title or an author to search.");
+      setFailure({ kind: "unknown", title: "Nothing to search", detail: "Enter a title or an author." });
       return;
     }
 
     setSearching(true);
-    setError(null);
+    setFailure(null);
+    setSearched(true);
     try {
       const response = await searchBooks({
         ...(trimmedTitle ? { title: trimmedTitle } : {}),
         ...(trimmedAuthor ? { author: trimmedAuthor } : {}),
       });
       setResults(response.results ?? []);
-      if ((response.results ?? []).length === 0) {
-        setError(
-          response.partial
-            ? "Some sources are still searching. Try again in a moment."
-            : "No DRM-free copy found. Try the author, or add it by title.",
-        );
-      }
+      setPending(response.partial ? (response.pending ?? []) : null);
+      setProviders(response.providers ?? null);
     } catch (caught) {
       setResults(null);
-      setError(caught instanceof ApiError ? caught.message : "Search failed. Try again.");
+      setPending(null);
+      setFailure(describeSearchFailure(caught));
     } finally {
       setSearching(false);
     }
@@ -61,7 +68,7 @@ export function useAddBook(): AddBookModel {
 
   const addResult = useCallback(async (result: BookResult) => {
     setSubmittingId(result.id);
-    setError(null);
+    setFailure(null);
     try {
       return await submitBook({
         title: result.title,
@@ -75,10 +82,9 @@ export function useAddBook(): AddBookModel {
         },
       });
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : "Could not add this book.");
-      return null;
-    } finally {
       setSubmittingId(null);
+      setFailure(describeAddFailure(caught));
+      return null;
     }
   }, []);
 
@@ -86,21 +92,31 @@ export function useAddBook(): AddBookModel {
     const trimmedTitle = title.trim();
     const trimmedAuthor = author.trim();
     if (!trimmedTitle || !trimmedAuthor) {
-      setError("A title and an author are both required.");
+      setFailure({ kind: "unknown", title: "Two fields to go", detail: "A title and an author are both required." });
       return null;
     }
 
     setSubmittingId("manual");
-    setError(null);
+    setFailure(null);
     try {
       return await submitBook({ title: trimmedTitle, author: trimmedAuthor });
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : "Could not add this book.");
+      setFailure(describeAddFailure(caught));
       return null;
-    } finally {
-      setSubmittingId(null);
     }
   }, [title, author]);
+
+  const reset = useCallback(() => {
+    setTitle("");
+    setAuthor("");
+    setResults(null);
+    setSearching(false);
+    setSubmittingId(null);
+    setFailure(null);
+    setPending(null);
+    setProviders(null);
+    setSearched(false);
+  }, []);
 
   return {
     title,
@@ -108,11 +124,15 @@ export function useAddBook(): AddBookModel {
     results,
     searching,
     submittingId,
-    error,
+    failure,
+    pending,
+    providers,
+    searched,
     setTitle,
     setAuthor,
     search,
     addResult,
     addManual,
+    reset,
   };
 }

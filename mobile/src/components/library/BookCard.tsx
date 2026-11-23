@@ -1,6 +1,6 @@
-import { Alert, Pressable, StyleSheet, View } from "react-native";
+import { Alert, StyleSheet, View } from "react-native";
 import type { Book } from "@/api/types";
-import { Badge, CoverArt, IconButton, AppText, LevelMeter } from "@/components/ui";
+import { Badge, CoverArt, IconButton, AppText, LevelMeter, PressableScale } from "@/components/ui";
 import { colors, radius } from "@/theme/tokens";
 import { bookStatusOf } from "./bookStatus";
 
@@ -23,11 +23,11 @@ export function BookCard({ book, onSelect, onDelete }: BookCardProps) {
 
   return (
     <View style={styles.card}>
-      <Pressable
-        accessibilityRole="button"
+      <PressableScale
         accessibilityLabel={book.status === "ready" ? `${book.title} by ${author}` : `${book.title} by ${author}, ${status.label}`}
         onPress={() => onSelect(book)}
-        style={({ pressed }) => [styles.press, pressed && { opacity: 0.86 }]}
+        style={styles.press}
+        activeScale={0.975}
       >
         <CoverArt coverR2Key={book.coverR2Key} title={book.title} width={152} style={styles.cover} />
         <View style={styles.meta}>
@@ -44,7 +44,7 @@ export function BookCard({ book, onSelect, onDelete }: BookCardProps) {
             </View>
           ) : null}
         </View>
-      </Pressable>
+      </PressableScale>
 
       <View style={styles.deleteSlot}>
         <IconButton icon="trash-2" label={`Delete ${book.title}`} onPress={confirmDelete} size="sm" />
@@ -54,7 +54,7 @@ export function BookCard({ book, onSelect, onDelete }: BookCardProps) {
 }
 
 const styles = StyleSheet.create({
-  card: { width: "47%", gap: 10, marginBottom: 24 },
+  card: { width: "100%", gap: 10 },
   press: { gap: 10 },
   cover: { alignSelf: "stretch", width: "100%" },
   meta: { gap: 3, paddingHorizontal: 2 },
