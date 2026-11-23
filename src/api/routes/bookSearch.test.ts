@@ -18,6 +18,11 @@ mock.module("../../db", () => ({
   pool: { connect: async () => ({ release: () => {} }), on: () => {} },
 }));
 
+mock.module("../../acquisition", () => {
+  const manifest = require("../../acquisition/manifest") as typeof import("../../acquisition/manifest");
+  return { bookProviders: manifest.bookProviders, enabledLibrarySources: manifest.enabledLibrarySources };
+});
+
 import { bookSearchRoutes } from "./bookSearch";
 import { dispatchRoute } from "../testSupport";
 import { AuthUser } from "../../auth";
