@@ -1,4 +1,4 @@
-import { bookProviders } from "../../acquisition";
+import { bookProviders } from "../../acquisition/manifest";
 import { BookFormat, SearchQuery } from "../../acquisition/types";
 import { json } from "../response";
 import { type RouteContext, type RouteTable } from "../route";
