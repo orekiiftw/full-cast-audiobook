@@ -66,6 +66,8 @@ export const TEMP = {
 export const ACQUISITION = {
   MAX_PROVIDER_NAME_LENGTH: 64,
   MAX_PROVIDER_BOOK_ID_LENGTH: 4096,
+  SEARCH_BUDGET_MS: 15_000,
+  PROVIDER_SEARCH_TIMEOUT_MS: 12_000,
 } as const;
 
 export const TORRENT = {

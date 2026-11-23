@@ -40,11 +40,9 @@ async function searchBooks({ req, user }: RouteContext): Promise<Response> {
   }
 
   const provider = readProvider(body);
-  const response = provider
-    ? await bookProviders.search(provider, query)
-    : { results: await bookProviders.searchAll(query), cache: "miss" as const };
+  const aggregation = await bookProviders.searchAll(query, provider ? { providers: [provider] } : {});
 
-  return json({ ...response, providers: bookProviders.enabled() });
+  return json({ ...aggregation, providers: bookProviders.enabled() });
 }
 
 async function getProviderBook({ user, params }: RouteContext): Promise<Response> {

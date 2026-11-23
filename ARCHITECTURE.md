@@ -215,6 +215,12 @@ manifest entry — no caller changes.
 `BOOK_SEARCH_CACHE_TTL_MS` (default 1 h) and is TTL-invalidated; `book_metadata` keys details by
 `(provider, provider_book_id)` with `last_verified`. Both live in Postgres so instances share them.
 
+**Search budget** bounds `POST /api/book-search` at `ACQUISITION.SEARCH_BUDGET_MS` (15 s, overridable
+with `BOOK_SEARCH_BUDGET_MS`): the route answers with every provider that finished, plus
+`partial`/`pending` naming the ones still working, so one slow source can never hold the response
+past a client timeout. Provider HTTP search timeouts are `PROVIDER_SEARCH_TIMEOUT_MS` (12 s), below
+the budget; a provider that finishes after the deadline still fills the cache for the next search.
+
 **Ranking** is deterministic and configured by `PREFERRED_LANGUAGES` (default `en`) and
 `PREFERRED_FORMATS` (default `epub`): exact ISBN, exact and token title matches, author tokens,
 language, format, plus a sane-size signal.

@@ -23,15 +23,18 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
 
 export class ApiError extends Error {
   readonly status: number;
+  // A request that ran out of its own time budget: no HTTP status, but not an unreachable server.
+  readonly timedOut: boolean;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, options: { timedOut?: boolean } = {}) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.timedOut = options.timedOut ?? false;
   }
 
   get isOffline(): boolean {
-    return this.status === 0;
+    return this.status === 0 && !this.timedOut;
   }
 }
 
@@ -41,24 +44,49 @@ interface RequestOptions {
   // Auth endpoints must not report a 401 as an expired session: it means bad credentials.
   notifyOnUnauthorized?: boolean;
   signal?: AbortSignal;
+  timeoutMs?: number;
+  timeoutMessage?: string;
 }
 
-const REQUEST_TIMEOUT_MS = 30_000;
+export const REQUEST_TIMEOUT_MS = 30_000;
+
+// The server answers a search inside its own 15s budget, so this only fires when the request
+// itself is stuck. It stays above the budget by design.
+export const SEARCH_TIMEOUT_MS = 60_000;
+
+export const TIMEOUT_MESSAGE = "The request is taking too long — try again.";
+
+export const SEARCH_TIMEOUT_MESSAGE = "Search is taking too long — try again.";
+
+// The only message that names the address: the request never reached the server at all.
+export const UNREACHABLE_MESSAGE = `Can't reach the server at ${API_BASE_URL}. Check API_BASE_URL (EXPO_PUBLIC_API_BASE_URL) and that the server is running.`;
 
 export function apiUrl(path: string): string {
   return path.startsWith("http") ? path : `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
 export async function apiFetch(path: string, options: RequestOptions = {}): Promise<Response> {
-  const { method = "GET", body, notifyOnUnauthorized = true, signal } = options;
+  const {
+    method = "GET",
+    body,
+    notifyOnUnauthorized = true,
+    signal,
+    timeoutMs = REQUEST_TIMEOUT_MS,
+    timeoutMessage = TIMEOUT_MESSAGE,
+  } = options;
   const headers: Record<string, string> = { Accept: "application/json" };
 
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (bearerToken) headers.Authorization = `Bearer ${bearerToken}`;
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  if (signal) signal.addEventListener("abort", () => controller.abort());
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  const forwardAbort = () => controller.abort();
+  signal?.addEventListener("abort", forwardAbort);
 
   let response: Response;
   try {
@@ -70,9 +98,11 @@ export async function apiFetch(path: string, options: RequestOptions = {}): Prom
     });
   } catch (error) {
     if (signal?.aborted) throw error;
-    throw new ApiError(0, "Network error. Check the connection and API address.");
+    if (timedOut) throw new ApiError(0, timeoutMessage, { timedOut: true });
+    throw new ApiError(0, UNREACHABLE_MESSAGE);
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", forwardAbort);
   }
 
   if (response.status === 401 && notifyOnUnauthorized && bearerToken) {

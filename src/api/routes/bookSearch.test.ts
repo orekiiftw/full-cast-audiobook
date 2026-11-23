@@ -73,6 +73,78 @@ describe("book search routes", () => {
     }
   });
 
+  it("answers inside the budget and marks the slow provider pending", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalBudget = process.env.BOOK_SEARCH_BUDGET_MS;
+    process.env.BOOK_SEARCH_BUDGET_MS = "1000";
+
+    globalThis.fetch = mock(async (url: string | URL | Request) => {
+      const urlStr = url.toString();
+      if (urlStr.includes("advancedsearch.php")) {
+        return new Response(
+          JSON.stringify({
+            response: {
+              docs: [{ identifier: "godan-archive-test", title: "Godan", creator: "Munshi Premchand" }],
+            },
+          }),
+        );
+      }
+      if (urlStr.includes("gutendex.com")) return new Promise<Response>(() => {});
+      return new Response("Not found", { status: 404 });
+    }) as unknown as typeof fetch;
+
+    try {
+      const req = new Request("http://localhost/api/book-search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "Godan", author: "Premchand" }),
+      });
+
+      const started = performance.now();
+      const res = await dispatchRoute(bookSearchRoutes, req, testUser);
+      const elapsed = performance.now() - started;
+      expect(res.status).toBe(200);
+      expect(elapsed).toBeLessThan(3_000);
+
+      const data = await res.json();
+      expect(data.results.length).toBeGreaterThan(0);
+      expect(data.partial).toBe(true);
+      expect(data.pending).toEqual(["gutenberg"]);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalBudget === undefined) delete process.env.BOOK_SEARCH_BUDGET_MS;
+      else process.env.BOOK_SEARCH_BUDGET_MS = originalBudget;
+    }
+  });
+
+  it("marks a search complete when every provider answers", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = mock(async (url: string | URL | Request) => {
+      const urlStr = url.toString();
+      if (urlStr.includes("advancedsearch.php")) {
+        return new Response(JSON.stringify({ response: { docs: [{ identifier: "godan-archive-test", title: "Godan" }] } }));
+      }
+      return new Response("Not found", { status: 404 });
+    }) as unknown as typeof fetch;
+
+    try {
+      const req = new Request("http://localhost/api/book-search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "Godan" }),
+      });
+
+      const res = await dispatchRoute(bookSearchRoutes, req, testUser);
+      expect(res.status).toBe(200);
+
+      const data = await res.json();
+      expect(data.partial).toBe(false);
+      expect(data.pending).toEqual([]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("fetches book details for an archive-org item", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = mock(async (url: string | URL | Request) => {

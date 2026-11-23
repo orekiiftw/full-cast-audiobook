@@ -1,3 +1,4 @@
+import { ACQUISITION } from "../../lib/constants";
 import { readStreamWithCap } from "../../lib/readStream";
 import { fetchWithRedirectGuard } from "../../lib/redirectGuard";
 import { BookNotFoundError, ProviderUnavailableError } from "../errors";
@@ -19,7 +20,7 @@ export class LibgenProvider implements BookProvider {
     const url = `${this.base}/index.php?req=${encodeURIComponent(term)}`;
     const res = await fetchWithRedirectGuard({
       url,
-      timeoutMs: 30_000,
+      timeoutMs: ACQUISITION.PROVIDER_SEARCH_TIMEOUT_MS,
       guard: providerRedirectGuard("LibGen search", LIBGEN_HOSTS, this.name),
       headers: { "User-Agent": "Mozilla/5.0", Accept: "text/html" },
     });
