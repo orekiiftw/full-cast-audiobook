@@ -1,8 +1,9 @@
 import { resolveRange, statFile, streamFile, type StreamRange, type StreamResult } from "../../storage/r2";
 import { isSafeStorageKey } from "../../storage/keys";
 import { corsHeaders, json } from "../response";
-import { type RouteContext, type RouteTable } from "../route";
-import { ownsStorageKey } from "../../books/ownership";
+import { type PublicRouteContext, type PublicRouteTable } from "../route";
+import { ownsStorageKey, ownerOfStorageKey } from "../../books/ownership";
+import { matchesMediaSignature, mediaExpiryValid } from "../../lib/mediaToken";
 
 const CONTENT_TYPES: Record<string, string> = {
   wav: "audio/wav",
@@ -13,23 +14,44 @@ const CONTENT_TYPES: Record<string, string> = {
   webp: "image/webp",
 };
 
-export const audioRoutes: RouteTable = {
+export const audioRoutes: PublicRouteTable = {
   "GET /api/audio": streamAudio,
 };
 
-async function streamAudio({ req, user }: RouteContext): Promise<Response> {
-  const key = new URL(req.url).searchParams.get("key");
+async function streamAudio({ req, user }: PublicRouteContext): Promise<Response> {
+  const params = new URL(req.url).searchParams;
+  const key = params.get("key");
   if (!key) {
     return json({ error: "Missing file key parameter" }, 400);
   }
   if (!isSafeStorageKey(key)) {
     return json({ error: "Invalid file key" }, 400);
   }
+
+  if (params.has("sig") || params.has("exp")) {
+    if (!(await signatureAllows(params, key))) {
+      return json({ error: "Forbidden: invalid or expired media signature" }, 403);
+    }
+    return serveStoredFile(req, key);
+  }
+
+  if (!user) return json({ error: "Authentication required" }, 401);
   if (!(await ownsStorageKey(user.id, key))) {
     return json({ error: "File not found" }, 404);
   }
 
   return serveStoredFile(req, key);
+}
+
+async function signatureAllows(params: URLSearchParams, key: string): Promise<boolean> {
+  const sig = params.get("sig");
+  const exp = Number(params.get("exp"));
+  if (!sig || !mediaExpiryValid(exp)) return false;
+
+  const ownerId = await ownerOfStorageKey(key);
+  if (!ownerId) return false;
+
+  return matchesMediaSignature(key, ownerId, exp, sig);
 }
 
 async function serveStoredFile(req: Request, key: string): Promise<Response> {

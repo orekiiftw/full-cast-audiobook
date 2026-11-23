@@ -4,10 +4,16 @@ mock.module("../../books/ownership", () => ({
   ownedBook: async (_userId: string, bookId: string) => ({ id: bookId }),
 }));
 
+const SSE_QUERY_TOKEN = "sse-query-token-under-test";
+
+mock.module("../../auth/sessions", () => ({
+  authenticateSessionToken: async (token: string) => (token === SSE_QUERY_TOKEN ? testUser : null),
+}));
+
 import { pipelineEvents } from "../../queue";
 import { eventRoutes } from "./events";
 import { dispatchRoute } from "../testSupport";
-import { AuthUser } from "../../auth";
+import type { AuthUser } from "../../auth";
 
 const testUser: AuthUser = {
   id: "00000000-0000-0000-0000-000000000060",
@@ -18,10 +24,15 @@ function publish(bookId: string, type: string, fields: Record<string, unknown>):
   pipelineEvents.emit("progress", { bookId, type, ...fields, timestamp: Date.now() });
 }
 
-async function messagesOnConnect(bookId: string): Promise<string[]> {
+function openStream(bookId: string, query = "", user: AuthUser | null = testUser): Promise<Response> {
+  const req = new Request(`http://localhost/api/books/${bookId}/events${query}`);
+  return dispatchRoute(eventRoutes, req, user);
+}
+
+async function messagesOnConnect(bookId: string, { query = "", user = testUser as AuthUser | null } = {}): Promise<string[]> {
   const abort = new AbortController();
-  const req = new Request(`http://localhost/api/books/${bookId}/events`, { signal: abort.signal });
-  const res = await dispatchRoute(eventRoutes, req, testUser);
+  const req = new Request(`http://localhost/api/books/${bookId}/events${query}`, { signal: abort.signal });
+  const res = await dispatchRoute(eventRoutes, req, user);
   expect(res.status).toBe(200);
 
   const reader = res.body!.getReader();
@@ -50,6 +61,26 @@ describe("GET /api/books/:bookId/events", () => {
     publish("00000000-0000-0000-0000-000000000069", "status_change", { status: "discovering", message: "Another book" });
 
     expect(await messagesOnConnect(bookId)).toEqual(['Searching torrents for "Dune"...', "Searching torrents-csv..."]);
+  });
+
+  it("authenticates a native client from the token query parameter", async () => {
+    const bookId = "00000000-0000-0000-0000-000000000063";
+    publish(bookId, "status_change", { status: "discovering", message: 'Searching torrents for "Dune"...' });
+
+    expect(await messagesOnConnect(bookId, { query: `?token=${SSE_QUERY_TOKEN}`, user: null })).toEqual([
+      'Searching torrents for "Dune"...',
+    ]);
+  });
+
+  it("rejects an unknown token query parameter", async () => {
+    const res = await openStream("00000000-0000-0000-0000-000000000064", "?token=not-a-session", null);
+
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: string }).error).toBe("Authentication required");
+  });
+
+  it("rejects an unauthenticated stream with no token at all", async () => {
+    expect((await openStream("00000000-0000-0000-0000-000000000065", "", null)).status).toBe(401);
   });
 
   it("stops replaying once the book leaves discovery", async () => {

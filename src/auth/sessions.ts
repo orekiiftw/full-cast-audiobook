@@ -1,10 +1,9 @@
 import { createHash, randomBytes } from "crypto";
-import { and, eq, gt, gte, lt } from "drizzle-orm";
+import { eq, lt } from "drizzle-orm";
 import { db } from "../db";
-import { sessions, users } from "../schema";
-import { firstRow } from "../lib/query";
-
-const SESSION_COOKIE = "narratea_session";
+import { sessions } from "../schema";
+import { readSessionToken, SESSION_COOKIE } from "./sessionTokens";
+import { findUserByTokenHash } from "./sessionLookup";
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -19,20 +18,7 @@ export interface AuthUser {
   email: string;
 }
 
-export function readSessionToken(req: Request): string | null {
-  const cookie = req.headers.get("cookie");
-  if (!cookie) return null;
-  for (const part of cookie.split(";")) {
-    const [name, ...value] = part.trim().split("=");
-    if (name !== SESSION_COOKIE) continue;
-    try {
-      return decodeURIComponent(value.join("="));
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
+export { readBearerSessionToken, readCookieSessionToken, readSessionToken } from "./sessionTokens";
 
 export function sessionCookie(token: string, expires: Date): string {
   return `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Expires=${expires.toUTCString()}${secureAttribute()}`;
@@ -88,25 +74,12 @@ export async function revokeSession(token: string): Promise<void> {
 export async function authenticateRequest(req: Request): Promise<AuthUser | null> {
   const token = readSessionToken(req);
   if (!token) return null;
+  return authenticateSessionToken(token);
+}
 
-  const minCreatedAt = new Date(Date.now() - SESSION_MAX_AGE_MS);
-  const row = await firstRow(
-    db
-      .select({ id: users.id, email: users.email })
-      .from(sessions)
-      .innerJoin(users, eq(sessions.userId, users.id))
-      .where(
-        and(
-          eq(sessions.tokenHash, hashSessionToken(token)),
-          gt(sessions.expiresAt, new Date()),
-          gte(sessions.createdAt, minCreatedAt),
-          eq(users.disabled, false),
-        ),
-      )
-      .limit(1),
-  );
-
-  return row ?? null;
+export async function authenticateSessionToken(token: string): Promise<AuthUser | null> {
+  if (!token) return null;
+  return findUserByTokenHash(hashSessionToken(token), new Date(Date.now() - SESSION_MAX_AGE_MS));
 }
 
 function hashSessionToken(token: string): string {

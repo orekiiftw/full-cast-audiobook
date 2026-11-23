@@ -1,6 +1,8 @@
 import { discoveryStageMessages, pipelineEvents } from "../../queue";
+import { authenticateSessionToken } from "../../auth/sessions";
+import type { AuthUser } from "../../auth";
 import { corsHeaders, json } from "../response";
-import { type RouteContext, type RouteTable } from "../route";
+import { type PublicRouteContext, type PublicRouteTable } from "../route";
 import { requireUuid } from "../../lib/validators";
 import { ownedBook } from "../../books/ownership";
 
@@ -10,19 +12,22 @@ const MAX_SSE_PER_USER = 8;
 
 const activeStreamsByUser = new Map<string, number>();
 
-export const eventRoutes: RouteTable = {
+export const eventRoutes: PublicRouteTable = {
   "GET /api/books/:bookId/events": streamBookEvents,
 };
 
-async function streamBookEvents({ req, user, params }: RouteContext): Promise<Response> {
-  const bookId = requireUuid(params.bookId, "bookId");
-  if (!(await ownedBook(user.id, bookId))) return json({ error: "Book not found" }, 404);
+async function streamBookEvents({ req, user, params }: PublicRouteContext): Promise<Response> {
+  const viewer = user ?? (await sessionFromQuery(req));
+  if (!viewer) return json({ error: "Authentication required" }, 401);
 
-  if (!openStreamSlot(user.id)) {
+  const bookId = requireUuid(params.bookId, "bookId");
+  if (!(await ownedBook(viewer.id, bookId))) return json({ error: "Book not found" }, 404);
+
+  if (!openStreamSlot(viewer.id)) {
     return json({ error: "Too many live event connections. Close one and try again." }, 429);
   }
 
-  return new Response(createBookEventStream(req, user.id, bookId), {
+  return new Response(createBookEventStream(req, viewer.id, bookId), {
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
@@ -31,6 +36,12 @@ async function streamBookEvents({ req, user, params }: RouteContext): Promise<Re
       ...corsHeaders(),
     },
   });
+}
+
+async function sessionFromQuery(req: Request): Promise<AuthUser | null> {
+  const token = new URL(req.url).searchParams.get("token");
+  if (!token) return null;
+  return authenticateSessionToken(token);
 }
 
 function createBookEventStream(req: Request, userId: string, bookId: string): ReadableStream<Uint8Array> {

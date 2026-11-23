@@ -12,20 +12,20 @@ import { castRoutes } from "./routes/cast";
 import { playbackRoutes } from "./routes/playback";
 import { pronunciationRoutes } from "./routes/pronunciation";
 import { eventRoutes } from "./routes/events";
+import { mediaTokenRoutes } from "./routes/mediaTokens";
 import { authenticateRequest } from "../auth";
 
-const PUBLIC_ROUTES: PublicRouteTable = authRoutes;
+const PUBLIC_ROUTES: PublicRouteTable = { ...authRoutes, ...audioRoutes, ...eventRoutes };
 
 const PROTECTED_ROUTES: RouteTable[] = [
   bookRoutes,
   bookSearchRoutes,
   chapterRoutes,
   segmentRoutes,
-  audioRoutes,
   castRoutes,
   playbackRoutes,
   pronunciationRoutes,
-  eventRoutes,
+  mediaTokenRoutes,
 ];
 
 export async function handleRequest(req: Request, connectionIp = "unknown"): Promise<Response> {

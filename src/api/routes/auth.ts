@@ -32,7 +32,7 @@ export const authRoutes: PublicRouteTable = {
 async function signUp({ req, connectionIp }: PublicRouteContext): Promise<Response> {
   if (rateLimited(req, connectionIp)) return json({ error: "Too many attempts. Try again later." }, 429);
 
-  const { email, password } = await credentials(req);
+  const { email, password, native } = await credentials(req);
 
   if (process.env.REGISTRATION_ENABLED !== "true") {
     return json({ error: "Account registration is disabled." }, 403);
@@ -48,18 +48,23 @@ async function signUp({ req, connectionIp }: PublicRouteContext): Promise<Respon
   }
 
   const session = await createSession(created.id);
-  return withCookie({ user: created }, sessionCookie(session.token, session.expiresAt), 201);
+  return sessionResponse({ user: created }, session, native, sessionCookie(session.token, session.expiresAt), 201);
 }
 
 async function logIn({ req, connectionIp }: PublicRouteContext): Promise<Response> {
   if (rateLimited(req, connectionIp)) return json({ error: "Too many attempts. Try again later." }, 429);
 
-  const { email, password } = await credentials(req);
+  const { email, password, native } = await credentials(req);
   const account = await authenticateAccount(email, password);
   if (!account) return json({ error: "Invalid email or password." }, 401);
 
   const session = await createSessionRotating(account.id);
-  return withCookie({ user: { id: account.id, email: account.email } }, sessionCookie(session.token, session.expiresAt));
+  return sessionResponse(
+    { user: { id: account.id, email: account.email } },
+    session,
+    native,
+    sessionCookie(session.token, session.expiresAt),
+  );
 }
 
 async function logOut({ req }: PublicRouteContext): Promise<Response> {
@@ -75,12 +80,24 @@ async function currentUser({ user }: PublicRouteContext): Promise<Response> {
   return json({ user }, 200, { "Cache-Control": "no-store" });
 }
 
-async function credentials(req: Request): Promise<{ email: string; password: string }> {
+async function credentials(req: Request): Promise<{ email: string; password: string; native: boolean }> {
   const body = (await readJsonWithLimit(req)) as Record<string, unknown>;
   return {
     email: normalizeEmail(typeof body.email === "string" ? body.email : ""),
     password: typeof body.password === "string" ? body.password : "",
+    native: body.client === "native",
   };
+}
+
+function sessionResponse(
+  data: Record<string, unknown>,
+  session: { token: string; expiresAt: Date },
+  native: boolean,
+  cookie: string,
+  status = 200,
+): Response {
+  const body = native ? { ...data, token: session.token, expiresAt: session.expiresAt.toISOString() } : data;
+  return withCookie(body, cookie, status);
 }
 
 function withCookie(data: unknown, cookie: string, status = 200): Response {

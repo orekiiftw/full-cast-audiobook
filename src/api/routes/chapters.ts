@@ -1,5 +1,7 @@
 import { listChapterSegments } from "../../books";
-import { versionedAudioUrl } from "../../lib/audioUrl";
+import { audioUrl, withVersion } from "../../lib/audioUrl";
+import { mediaTokenExpiry, signedAudioUrl } from "../../lib/mediaToken";
+import { readBearerSessionToken } from "../../auth/sessionTokens";
 import { json } from "../response";
 import { type RouteContext, type RouteTable } from "../route";
 import { ValidationError, requireUuid } from "../../lib/validators";
@@ -24,7 +26,7 @@ async function getChapterSegments({ req, user, params }: RouteContext): Promise<
   return json(await listChapterSegments(chapter, chapterId, anchorSegmentIndex));
 }
 
-async function redirectChapterAudio({ user, params }: RouteContext): Promise<Response> {
+async function redirectChapterAudio({ req, user, params }: RouteContext): Promise<Response> {
   const chapterId = requireUuid(params.chapterId, "chapterId");
   const owned = await ownedChapter(user.id, chapterId);
   const chapter = owned?.chapter;
@@ -36,10 +38,14 @@ async function redirectChapterAudio({ user, params }: RouteContext): Promise<Res
     return json({ error: "Chapter audio is not stitched or ready yet" }, 400);
   }
 
+  const location = readBearerSessionToken(req)
+    ? signedAudioUrl(chapter.audioR2Key, user.id, mediaTokenExpiry())
+    : audioUrl(chapter.audioR2Key);
+
   return new Response(null, {
     status: 302,
     headers: {
-      Location: versionedAudioUrl(chapter.audioR2Key, chapter.durationMs),
+      Location: withVersion(location, chapter.durationMs),
     },
   });
 }

@@ -50,24 +50,24 @@ export async function ownedCastMember(userId: string, castId: string) {
 }
 
 export async function ownsStorageKey(userId: string, key: string): Promise<boolean> {
+  return (await ownerOfStorageKey(key)) === userId;
+}
+
+export async function ownerOfStorageKey(key: string): Promise<string | null> {
   const namespaced = BOOK_KEY_RE.exec(key);
   if (namespaced) {
-    return !!(await ownedBook(userId, namespaced[1]));
+    const book = await firstRow(db.select({ userId: books.userId }).from(books).where(eq(books.id, namespaced[1])).limit(1));
+    return book?.userId ?? null;
   }
 
   const row = await firstRow(
     db
-      .select({ id: books.id })
+      .select({ userId: books.userId })
       .from(books)
       .leftJoin(chapters, eq(chapters.bookId, books.id))
       .leftJoin(segments, eq(segments.chapterId, chapters.id))
-      .where(
-        and(
-          eq(books.userId, userId),
-          or(eq(books.coverR2Key, key), eq(books.epubR2Key, key), eq(chapters.audioR2Key, key), eq(segments.audioR2Key, key)),
-        ),
-      )
+      .where(or(eq(books.coverR2Key, key), eq(books.epubR2Key, key), eq(chapters.audioR2Key, key), eq(segments.audioR2Key, key)))
       .limit(1),
   );
-  return !!row;
+  return row?.userId ?? null;
 }
