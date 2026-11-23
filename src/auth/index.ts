@@ -1,9 +1,12 @@
 export {
   authenticateRequest,
+  authenticateSessionToken,
   clearSessionCookie,
   createSession,
   createSessionRotating,
   parsedClientIp,
+  readBearerSessionToken,
+  readCookieSessionToken,
   readSessionToken,
   revokeSession,
   sessionCookie,

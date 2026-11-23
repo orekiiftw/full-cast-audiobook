@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from "bun:test";
+import { afterEach, describe, expect, it, mock } from "bun:test";
 
 class FakeRedis {
   on() {}
@@ -23,7 +23,10 @@ mock.module("ioredis", () => ({ Redis: FakeRedis, default: FakeRedis }));
 const BOOK_ID = "00000000-0000-0000-0000-000000000050";
 const CHAPTER_ID = "00000000-0000-0000-0000-000000000051";
 const FOREIGN_CHAPTER_ID = "00000000-0000-0000-0000-000000000052";
+const READY_CHAPTER_ID = "00000000-0000-0000-0000-000000000056";
+const READY_CHAPTER_DURATION_MS = 1234;
 const CHAPTER_INDEX = 3;
+const READY_CHAPTER_KEY = `books/${BOOK_ID}/chapters/chapter_${CHAPTER_INDEX}.mp3`;
 
 const SEGMENT_ROWS = [
   { id: "00000000-0000-0000-0000-000000000053", segmentIndex: 1, rawText: "First.", status: "voiced", audioR2Key: null, durationMs: null },
@@ -55,7 +58,20 @@ mock.module("../../books/ownership", () => ({
   ownedBook: async () => ({ id: BOOK_ID }),
   ownedChapter: async (_userId: string, chapterId: string) => {
     chapterLookups++;
-    return chapterId === CHAPTER_ID ? { chapter: { id: CHAPTER_ID, bookId: BOOK_ID, chapterIndex: CHAPTER_INDEX } } : undefined;
+    if (chapterId === CHAPTER_ID) return { chapter: { id: CHAPTER_ID, bookId: BOOK_ID, chapterIndex: CHAPTER_INDEX } };
+    if (chapterId === READY_CHAPTER_ID) {
+      return {
+        chapter: {
+          id: READY_CHAPTER_ID,
+          bookId: BOOK_ID,
+          chapterIndex: CHAPTER_INDEX,
+          status: "ready",
+          audioR2Key: READY_CHAPTER_KEY,
+          durationMs: READY_CHAPTER_DURATION_MS,
+        },
+      };
+    }
+    return undefined;
   },
 }));
 
@@ -69,6 +85,7 @@ mock.module("../../orchestrator", () => ({
 
 import { chapterRoutes } from "./chapters";
 import { dispatchRoute } from "../testSupport";
+import { mediaSignature } from "../../lib/mediaToken";
 import { AuthUser } from "../../auth";
 import { ValidationError } from "../../lib/validators";
 
@@ -124,4 +141,46 @@ describe("chapter segment listing voicing-window anchor", () => {
       expect(lookaheadCalls).toHaveLength(0);
     });
   }
+});
+
+describe("GET /api/chapters/:chapterId/audio", () => {
+  const ENV_KEYS = ["MEDIA_TOKEN_SECRET"] as const;
+  const savedEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
+
+  afterEach(() => {
+    for (const key of ENV_KEYS) {
+      if (savedEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = savedEnv[key];
+    }
+  });
+
+  function audioReq(headers: Record<string, string> = {}): Request {
+    return new Request(`http://localhost/api/chapters/${READY_CHAPTER_ID}/audio`, { headers });
+  }
+
+  function location(res: Response): URL {
+    return new URL(res.headers.get("location")!, "http://localhost");
+  }
+
+  it("keeps the plain redirect for cookie clients", async () => {
+    const res = await dispatchRoute(chapterRoutes, audioReq({ cookie: "narratea_session=abc" }), testUser);
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(`/api/audio?key=${encodeURIComponent(READY_CHAPTER_KEY)}&v=${READY_CHAPTER_DURATION_MS}`);
+  });
+
+  it("signs the redirect for Bearer clients so the followed URL plays without a cookie", async () => {
+    process.env.MEDIA_TOKEN_SECRET = "chapter-redirect-secret";
+    const res = await dispatchRoute(chapterRoutes, audioReq({ Authorization: "Bearer native-token" }), testUser);
+
+    expect(res.status).toBe(302);
+    const url = location(res);
+    expect(url.pathname).toBe("/api/audio");
+    expect(url.searchParams.get("key")).toBe(READY_CHAPTER_KEY);
+    expect(url.searchParams.get("v")).toBe(String(READY_CHAPTER_DURATION_MS));
+
+    const exp = Number(url.searchParams.get("exp"));
+    expect(exp).toBeGreaterThan(Math.floor(Date.now() / 1000));
+    expect(url.searchParams.get("sig")).toBe(mediaSignature(READY_CHAPTER_KEY, testUser.id, exp));
+  });
 });

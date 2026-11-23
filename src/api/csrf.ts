@@ -1,9 +1,14 @@
 import { json } from "./response";
 import { publicRequestUrl } from "../lib/requestUrl";
+import { readBearerSessionToken } from "../auth/sessionTokens";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 export function csrfGuard(req: Request): Response | null {
+  if (readBearerSessionToken(req)) {
+    return null;
+  }
+
   if (req.headers.get("sec-fetch-site") === "cross-site") {
     return forbidden("cross-site request blocked");
   }

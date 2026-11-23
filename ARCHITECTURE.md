@@ -363,6 +363,41 @@ because re-voicing an existing row makes the delta depend on the previous status
 decrements `failedCount` and increments `voicedCount`, anything else increments `voicedCount`, and
 `voiced` reads without writing but still emits `segment_ready` since the audio did change.
 
+## Native clients
+
+**One session, two carriers.** `auth/sessionTokens.ts` reads the raw session token from
+`Authorization: Bearer` first and the `narratea_session` cookie second; `auth/sessions.ts` hashes it
+and `auth/sessionLookup.ts` owns the row query (token hash, expiry, `SESSION_MAX_AGE_MS` floor,
+`users.disabled`). A native client therefore holds the same session row a browser cookie names — same
+30-day TTL, same rotation on login — so logging out with either carrier revokes it, and there is no
+second token type to keep in sync. The split exists so the readers stay DB-free: `csrf.ts` and the
+chapter-audio route import them without dragging a pool into the request path.
+
+**Bearer skips CSRF, decided from the header alone.** A cross-origin page cannot set `Authorization`,
+so a Bearer request has no ambient credential to forge and gets neither the `Sec-Fetch-Site` check nor
+the `Origin` check; the guard needs no database read to know that. Everything cookie-authenticated
+keeps the existing order and verdicts. `POST /api/auth/login|signup` add `token` and `expiresAt` to
+the JSON body only when the body carries `client: "native"`, and still set the cookie, so the web
+response is unchanged for every other caller.
+
+**Media URLs are signed because players cannot carry headers.** An `<audio>` element or a native
+player issues its own range requests; neither attaches a cookie reliably nor an `Authorization`
+header. `POST /api/media-tokens` checks ownership once, then signs `key|userId|exp` with
+HMAC-SHA256 under `MEDIA_TOKEN_SECRET` and returns `/api/audio?key=…&exp=…&sig=…` valid for
+`MEDIA_TOKEN_TTL_SECONDS` (default 6 h). `GET /api/audio` then accepts a session or a constant-time
+verified signature and trusts it for its TTL, skipping the ownership query. The URL carries no user
+id, so verification derives the signer from the key's own `books/<bookId>/` namespace
+(`ownerOfStorageKey`) — which is also why a signature minted for one user never validates against
+another user's key. That is one indexed lookup per signed request instead of the ownership join, and
+it is the price of keeping user ids out of player-facing URLs. The audio and SSE tables are matched
+before the router's blanket 401 so their handlers can authenticate themselves; both still reject an
+anonymous request.
+
+**SSE takes `?token=` for EventSource.** `GET /api/books/:bookId/events` authenticates a Bearer
+header like any other route and falls back to `?token=` for clients that cannot set headers, handing
+that raw token to the same `authenticateSessionToken` the header path uses. The token is never logged
+(the error mapper prints the path only) and the 8-stream cap and 15 s heartbeat are unchanged.
+
 ## Audio and storage
 
 **WAV invariants.** `parseWav` walks chunks from offset 12, requires `fmt ` (16+ bytes) and a

@@ -104,6 +104,8 @@ Ensure you configure:
 - `REGISTRATION_ENABLED`: Set to `true` to allow new-account signup. Defaults to closed — enable it to create your account(s), then remove it (or set `false`) before exposing the server beyond loopback.
 - `SESSION_MAX_AGE_MS`: Optional absolute cap on session lifetime (bounded above by the 30-day rolling TTL; e.g. `86400000` = 1 day). A stolen cookie stops being honored once it is older than this. Sessions are also rotated on every login, revoking prior sessions, so a cookie stolen before a login is invalidated immediately.
 - `MAX_WORKERS_PER_BOOK`, `INGESTION_CONCURRENCY`, `STITCH_CONCURRENCY`: Optional per-instance pipeline worker concurrency (defaults 3 / 2 / 2). These bound how many BullMQ jobs one instance processes at once.
+- `MEDIA_TOKEN_SECRET`: HMAC key for the signed audio URLs that native clients play. Set a random value (e.g. `openssl rand -base64 32`) in production; when it is unset the server generates a per-process secret and logs one warning, which means signed URLs stop working after a restart and are not valid across instances.
+- `MEDIA_TOKEN_TTL_SECONDS`: Lifetime of a signed media URL in seconds (default `21600`, 6 hours).
 
 ### Durable pipeline & multiple instances
 
@@ -142,6 +144,60 @@ For local frontend hot-reloading:
 bun run dev:client
 ```
 Navigate to `http://localhost:5173`. Frontend API calls are automatically proxied to the Bun server on port 3000.
+
+## Native clients
+
+The web app authenticates with an HttpOnly session cookie, which a native client (React Native/Expo) cannot rely on: cookies do not attach to an audio player, and `EventSource` cannot set headers. The API therefore accepts the same session as a bearer token and hands out short-lived signed URLs for media. All of it is additive — a browser that sends cookies sees exactly the same responses as before.
+
+### 1. Log in and keep the token
+
+Send `client: "native"` in the JSON body of `POST /api/auth/login` or `POST /api/auth/signup`:
+
+```http
+POST /api/auth/login
+{ "email": "you@example.com", "password": "...", "client": "native" }
+```
+
+```json
+{
+  "user": { "id": "…", "email": "you@example.com" },
+  "token": "<session token>",
+  "expiresAt": "2026-12-23T09:00:00.000Z"
+}
+```
+
+The `Set-Cookie` header is still sent, and without the `client` field (or with any other value) the body is unchanged. `token` is the raw session the cookie would carry, so the same rules apply: 30-day rolling TTL (or the `SESSION_MAX_AGE_MS` cap), rotated on every login, revoked by `POST /api/auth/logout`. Store it in the platform keychain rather than as plain text.
+
+### 2. Send the token as a header
+
+```
+Authorization: Bearer <token>
+```
+
+Every route that accepts the cookie accepts this header; when a request carries both, the header wins. Bearer requests skip the CSRF guard entirely — a cross-origin page cannot set `Authorization`, so there is no ambient credential to forge, while cookie-authenticated requests keep the same `Sec-Fetch-Site`/`Origin` checks as before. `CORS_ORIGIN` deployments allow the header in preflight.
+
+### 3. Ask for signed media URLs
+
+Audio players take a URL, not a header:
+
+```http
+POST /api/media-tokens
+Authorization: Bearer <token>
+{ "keys": ["books/<bookId>/chapters/chapter_1.mp3"] }
+```
+
+```json
+{
+  "urls": { "books/<bookId>/chapters/chapter_1.mp3": "/api/audio?key=…&exp=1750000000&sig=…" },
+  "expiresAt": "2026-11-23T15:00:00.000Z"
+}
+```
+
+Each call takes 1–50 storage keys the caller owns (segment `audioUrl` and chapter audio keys come from the segments/chapters endpoints). A malformed key is a 400, a key you do not own is a 404. The URLs are relative — join them with your API base — and need no session, so they work from a player with no headers, range requests and seeking included. They stay valid until the shared `exp` (`MEDIA_TOKEN_TTL_SECONDS`, default 6 hours); asking again before then is the refresh path. `GET /api/chapters/:chapterId/audio` also answers a Bearer request with a signed `Location`, so following that redirect plays without a cookie.
+
+### 4. Live pipeline events
+
+`GET /api/books/:bookId/events` accepts the Bearer header, and also `?token=<session token>` for clients whose `EventSource` cannot set headers. The token belongs in the query only for that connection and must never be logged. The 8-stream-per-user cap and the 15-second heartbeat are unchanged.
 
 ## Deployment
 

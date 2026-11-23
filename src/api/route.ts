@@ -14,7 +14,7 @@ export interface RouteContext extends Omit<PublicRouteContext, "user"> {
   user: AuthUser;
 }
 
-type PublicRouteHandler = (ctx: PublicRouteContext) => Promise<Response>;
+export type PublicRouteHandler = (ctx: PublicRouteContext) => Promise<Response>;
 
 export type RouteHandler = (ctx: RouteContext) => Promise<Response>;
 
