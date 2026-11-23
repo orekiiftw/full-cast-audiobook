@@ -27,7 +27,7 @@ jobs:
         run: bun run typecheck
 
       - name: Tests
-        run: bun test
+        run: bun run test
 
       - name: Client build
         run: bun run build:client
