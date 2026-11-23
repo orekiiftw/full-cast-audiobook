@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from "bun:test";
+import { afterAll, describe, expect, it, mock } from "bun:test";
 
 class FakeRedis {
   on() {}
@@ -102,6 +102,10 @@ mock.module("../../acquisition", () => ({
     enabled: () => ["mock"],
   },
 }));
+
+afterAll(() => {
+  mock.restore();
+});
 
 import { createHash } from "crypto";
 import { bookRoutes } from "./books";
