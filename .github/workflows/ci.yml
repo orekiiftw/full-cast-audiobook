@@ -31,3 +31,24 @@ jobs:
 
       - name: Client build
         run: bun run build:client
+
+  # The Expo app is its own package with its own lockfile; it is installed and verified
+  # separately so a mobile dependency never reaches the server's dependency tree.
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: npx jest --ci

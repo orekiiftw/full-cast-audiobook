@@ -1,0 +1,5 @@
+# `bun test` globs the whole repo by default, which would also pick up the Expo app's Jest
+# suite under mobile/ (it imports react-native and cannot run on Bun). Scope Bun's test
+# runner to the server/client tree; the mobile package runs its own Jest suite.
+[test]
+root = "./src"

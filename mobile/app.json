@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "Narratea",
+    "slug": "narratea",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "narratea",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0b0f0d",
+    "newArchEnabled": true,
+    "icon": "./assets/icon.png",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ai.narratea.app"
+    },
+    "android": {
+      "package": "ai.narratea.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0b0f0d",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-font",
+      [
+        "expo-audio",
+        {
+          "enableBackgroundPlayback": false,
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0b0f0d",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 160
+        }
+      ]
+    ]
+  }
+}
