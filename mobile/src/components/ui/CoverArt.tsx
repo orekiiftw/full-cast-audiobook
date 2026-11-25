@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Image, StyleSheet, View, type ViewStyle } from "react-native";
+import { StyleSheet, View, type ViewStyle } from "react-native";
+import { Image } from "expo-image";
 import { getBearerToken } from "@/api/client";
 import { apiUrl } from "@/api/client";
 import { coverStreamUrl } from "@/api/audio";
@@ -16,6 +17,11 @@ interface CoverArtProps {
 // Cover art streams from the same authenticated `/api/audio` route as segment audio, so the
 // image request carries the bearer token too. A missing or forbidden cover falls back to the
 // typographic plate the web client uses, which is the common case for acquired books.
+//
+// The image goes through `expo-image` rather than React Native's `Image`: a cached cover is
+// decoded once and reused across the library grid, the detail hero and a scroll that recycles
+// both, instead of being fetched again on every mount. `memory-disk` keeps it for the session
+// and on disk, which is what makes a second look at the library instant.
 export function CoverArt({ coverR2Key, title, width, style }: CoverArtProps) {
   const [failed, setFailed] = useState(false);
   const streamPath = coverStreamUrl(coverR2Key);
@@ -27,10 +33,14 @@ export function CoverArt({ coverR2Key, title, width, style }: CoverArtProps) {
       {uri && !failed ? (
         <Image
           accessibilityLabel={`Cover of ${title}`}
-          source={{ uri, headers: token ? { Authorization: `Bearer ${token}` } : undefined }}
+          source={token ? { uri, headers: { Authorization: `Bearer ${token}` } } : { uri }}
           style={styles.image}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={180}
+          // A recycled grid row must not show the previous card's cover while the next decodes.
+          recyclingKey={uri}
           onError={() => setFailed(true)}
-          resizeMode="cover"
         />
       ) : (
         <View style={styles.plate}>

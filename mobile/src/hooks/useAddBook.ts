@@ -19,6 +19,9 @@ export interface AddBookModel {
   pending: string[] | null;
   providers: string[] | null;
   searched: boolean;
+  // Wall-clock bounds of the last search, for the "still searching · 8.4s" readout.
+  startedAt: number | null;
+  finishedAt: number | null;
   setTitle: (value: string) => void;
   setAuthor: (value: string) => void;
   search: () => Promise<void>;
@@ -37,6 +40,8 @@ export function useAddBook(): AddBookModel {
   const [pending, setPending] = useState<string[] | null>(null);
   const [providers, setProviders] = useState<string[] | null>(null);
   const [searched, setSearched] = useState(false);
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [finishedAt, setFinishedAt] = useState<number | null>(null);
 
   const search = useCallback(async () => {
     const trimmedTitle = title.trim();
@@ -49,6 +54,8 @@ export function useAddBook(): AddBookModel {
     setSearching(true);
     setFailure(null);
     setSearched(true);
+    setStartedAt(Date.now());
+    setFinishedAt(null);
     try {
       const response = await searchBooks({
         ...(trimmedTitle ? { title: trimmedTitle } : {}),
@@ -63,6 +70,7 @@ export function useAddBook(): AddBookModel {
       setFailure(describeSearchFailure(caught));
     } finally {
       setSearching(false);
+      setFinishedAt(Date.now());
     }
   }, [title, author]);
 
@@ -116,6 +124,8 @@ export function useAddBook(): AddBookModel {
     setPending(null);
     setProviders(null);
     setSearched(false);
+    setStartedAt(null);
+    setFinishedAt(null);
   }, []);
 
   return {
@@ -128,6 +138,8 @@ export function useAddBook(): AddBookModel {
     pending,
     providers,
     searched,
+    startedAt,
+    finishedAt,
     setTitle,
     setAuthor,
     search,

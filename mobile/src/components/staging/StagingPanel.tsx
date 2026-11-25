@@ -1,6 +1,6 @@
 import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import { Feather } from "@expo/vector-icons";
-import { AnimatedProgressBar, PulsingDot } from "@/components/ui/motion";
+import { AnimatedProgressBar, LivePulse } from "@/components/ui/motion";
 import { AppText, Badge, Button, Eyebrow, Notice, Row, Spinner } from "@/components/ui";
 import { STAGING_STAGES, stageStateOf, stagingHeadline, voicingSummary, type StagingState, type StageState } from "@/lib/addStage";
 import { colors, radius } from "@/theme/tokens";
@@ -42,7 +42,7 @@ export function StagingPanel({ staging, onRetry, retrying = false, maxLogLines =
           <Badge label="Stopped" tone="red" />
         ) : (
           <Row style={styles.live}>
-            <PulsingDot />
+            <LivePulse />
             <AppText variant="micro" uppercase tone="success">
               Live
             </AppText>
