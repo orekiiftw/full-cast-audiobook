@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
+import { createMockEpub } from "../epub/testFixture";
 import { readVerifiedBook, selectTorrentFile } from "./download";
 import { ZIP_BUFFER, zipResponse } from "./testSupport";
 
@@ -42,6 +43,26 @@ describe("selectTorrentFile md5 file selection", () => {
       { id: 2, name: "actual-book.epub", size: 200 },
     ];
     expect(selectTorrentFile(decoys)?.id).toBe(2);
+  });
+});
+
+describe("readVerifiedBook EPUB check", () => {
+  const htmlPage = () => new Response("<!DOCTYPE html><html><body>Runtime Error</body></html>");
+
+  test("rejects a web page served as the book", async () => {
+    await expect(readVerifiedBook(htmlPage(), "book.epub")).rejects.toThrow(
+      "not a readable EPUB (the download was a web page, not an EPUB)",
+    );
+  });
+
+  test("rejects an EPUB whose spine resolves to no files", async () => {
+    const emptySpine = createMockEpub({ emptySpine: true });
+
+    await expect(readVerifiedBook(new Response(new Uint8Array(emptySpine)), "book.epub")).rejects.toThrow("Spine is empty");
+  });
+
+  test("accepts a readable EPUB", async () => {
+    expect((await readVerifiedBook(zipResponse(), "book.epub")).buffer).toEqual(ZIP_BUFFER);
   });
 });
 

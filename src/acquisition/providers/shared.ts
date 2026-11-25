@@ -1,10 +1,9 @@
-import { parseEpub } from "../../epub";
+import { inspectEpub, parseEpub } from "../../epub";
 import { TORRENT } from "../../lib/constants";
 import { isAllowedHost } from "../../lib/hosts";
 import { detectIndicLanguage, normalizeLanguageCode, INDIC_LANGUAGES } from "../../lib/language";
 import { readStreamWithCap } from "../../lib/readStream";
 import { redirectFailureMessage, type RedirectGuard } from "../../lib/redirectGuard";
-import { isZipBuffer } from "../../lib/validators";
 import { errorMessage } from "../../lib/errors";
 import { ProviderUnavailableError, UnsupportedFormatError } from "../errors";
 import { rankBooks } from "../ranking";
@@ -84,7 +83,13 @@ async function acquireCandidate(
     onProgress?.(`Attempting "${result.title}" from ${label}...`);
     const acquired = await provider.acquire(result);
     const buffer = await readAcquiredBook(acquired);
-    if (buffer.length <= MIN_USABLE_EPUB_BYTES || !isZipBuffer(buffer)) return null;
+    if (buffer.length <= MIN_USABLE_EPUB_BYTES) return null;
+    const defect = inspectEpub(buffer);
+    if (defect) {
+      console.warn(`${label} item '${result.id}' is not a readable EPUB (${defect.detail}); skipping.`);
+      onProgress?.(`${label} sent a file that is not a readable EPUB — trying the next download...`);
+      return null;
+    }
     if (!hasScriptMatchingClaim(result, buffer)) {
       console.warn(`${label} item '${result.id}' claims language '${result.language}' but its text contains no such script; skipping.`);
       return null;

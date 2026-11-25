@@ -3,7 +3,7 @@ import { TORRENT } from "../lib/constants";
 import { sleep } from "../lib/async";
 import { fetchWithRedirectGuard, redirectFailureMessage, type RedirectGuard } from "../lib/redirectGuard";
 import { readStreamWithCap } from "../lib/readStream";
-import { isZipBuffer } from "../lib/validators";
+import { inspectEpub } from "../epub";
 import { isTorrentCached } from "./candidates";
 import {
   API_TIMEOUT_MS,
@@ -98,7 +98,8 @@ function verifyBookBuffer(buffer: Buffer, filename: string, expectedMd5?: string
   const isPdf = filename.toLowerCase().endsWith(".pdf") || buffer.toString("binary", 0, 4) === "%PDF";
   if (isPdf)
     throw new Error("PDF format detected. Only EPUB ebooks are supported to guarantee high-quality layout and multi-voice generation.");
-  if (!isZipBuffer(buffer)) throw new Error("The file is corrupted or is not a valid EPUB zip archive.");
+  const defect = inspectEpub(buffer);
+  if (defect) throw new Error(`The downloaded file is not a readable EPUB (${defect.detail}).`);
   const wantedMd5 = normalizeMd5(expectedMd5);
   if (wantedMd5 && createHash("md5").update(buffer).digest("hex") !== wantedMd5)
     throw new Error(`The downloaded file does not match the expected md5 ${wantedMd5}.`);
