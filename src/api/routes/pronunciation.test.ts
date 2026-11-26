@@ -1,4 +1,7 @@
 import { afterAll, describe, expect, it, mock } from "bun:test";
+import * as database from "../../db";
+import * as ownership from "../../books/ownership";
+import * as queue from "../../queue";
 
 class FakeRedis {
   on() {}
@@ -49,9 +52,14 @@ mock.module("../../books/ownership", () => ({
 mock.module("../../queue", () => ({
   invalidateBookVoiceContextClusterwide: () => {},
 }));
-// These mocks are file-scope, so restore them: without this, `bun test` without --isolate leaks
-// `ownedBook: async () => true` into every later file and any book authorises as owned.
-afterAll(() => mock.restore());
+// Mocks patch the loaded modules for the whole test process, so put the real exports back afterwards.
+// An empty registry is not enough: these bind into modules the rest of the run imports.
+const originals = { database: { ...database }, ownership: { ...ownership }, queue: { ...queue } };
+afterAll(() => {
+  mock.module("../../db", () => originals.database);
+  mock.module("../../books/ownership", () => originals.ownership);
+  mock.module("../../queue", () => originals.queue);
+});
 
 import { pronunciationRoutes } from "./pronunciation";
 import { dispatchRoute } from "../testSupport";
