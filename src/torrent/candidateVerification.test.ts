@@ -1,13 +1,16 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { createMockEpub } from "../epub/testFixture";
+import * as realSafety from "./safety";
 import type { TorrentCandidate } from "./types";
 
 // A CDN download is only reachable in this sandbox with DNS stubbed out; every other step of a candidate attempt
 // (TorBox cache check, add, poll, file selection, request-link, download, verification) runs for real.
-mock.module("./safety", () => ({
-  assertSafeDownloadUrlDns: async (url: string) => url,
-  isIpfsCid: () => false,
-}));
+// Only DNS is stubbed: every other export stays the real one, so this file does not change what
+// later suites see if the module cache keeps this binding.
+mock.module("./safety", () => ({ ...realSafety, assertSafeDownloadUrlDns: async (url: string) => url }));
+afterAll(() => {
+  mock.module("./safety", () => realSafety);
+});
 
 const { downloadBookFromCandidates } = await import("./index");
 
