@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from "bun:test";
+import { afterAll, describe, expect, it, mock } from "bun:test";
 
 class FakeRedis {
   on() {}
@@ -49,6 +49,9 @@ mock.module("../../books/ownership", () => ({
 mock.module("../../queue", () => ({
   invalidateBookVoiceContextClusterwide: () => {},
 }));
+// These mocks are file-scope, so restore them: without this, `bun test` without --isolate leaks
+// `ownedBook: async () => true` into every later file and any book authorises as owned.
+afterAll(() => mock.restore());
 
 import { pronunciationRoutes } from "./pronunciation";
 import { dispatchRoute } from "../testSupport";
