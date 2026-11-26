@@ -4,6 +4,7 @@ import { strToU8, zipSync } from "fflate";
 import { TORRENT } from "../../lib/constants";
 import { fetchEpubFromArchiveOrg } from "./archiveOrg";
 import { fetchEpubFromGutenberg } from "./gutenberg";
+import { createMockEpub } from "../../epub/testFixture";
 
 describe("fetchEpubFromArchiveOrg content verification", () => {
   it("skips an item whose OCR destroyed the script its metadata claims", async () => {
@@ -72,6 +73,73 @@ describe("fetchEpubFromArchiveOrg content verification", () => {
     try {
       const acquired = await fetchEpubFromArchiveOrg("The Time Machine", "Wells", () => {});
       expect(acquired!.filename).toBe("english-item.epub");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe("fallback candidate EPUB verification", () => {
+  it("skips an item whose download is a web page and takes the next ranked item", async () => {
+    const originalFetch = globalThis.fetch;
+    const good = createFallbackTestEpub("good-item", "The morning light filtered through the ancient forest onto the mossy path below.");
+
+    globalThis.fetch = mock(async (url: string | URL | Request) => {
+      const u = url.toString();
+      if (u.includes("advancedsearch.php")) {
+        return new Response(
+          JSON.stringify({
+            response: {
+              docs: [
+                { identifier: "page-item", title: "The Time Machine", creator: "Wells", language: "eng" },
+                { identifier: "good-item", title: "The Time Machine", creator: "Wells", language: "eng" },
+              ],
+            },
+          }),
+        );
+      }
+      if (u.includes("/metadata/")) {
+        const id = u.split("/metadata/")[1];
+        return new Response(JSON.stringify({ metadata: { title: id, language: "eng" }, files: [{ name: `${id}.epub` }] }));
+      }
+      if (u.includes("/download/page-item/")) {
+        return new Response("<!DOCTYPE html><html><body>Item not available</body></html>");
+      }
+      if (u.includes("/download/good-item/")) return new Response(new Uint8Array(good));
+      return new Response("Not found", { status: 404 });
+    }) as unknown as typeof fetch;
+
+    try {
+      const acquired = await fetchEpubFromArchiveOrg("The Time Machine", "Wells", () => {});
+      expect(acquired).not.toBeNull();
+      expect(acquired!.filename).toBe("good-item.epub");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("skips an item whose EPUB has no reading order", async () => {
+    const originalFetch = globalThis.fetch;
+    const emptySpine = createMockEpub({ emptySpine: true });
+
+    globalThis.fetch = mock(async (url: string | URL | Request) => {
+      const u = url.toString();
+      if (u.includes("advancedsearch.php")) {
+        return new Response(
+          JSON.stringify({
+            response: { docs: [{ identifier: "empty-item", title: "The Time Machine", creator: "Wells", language: "eng" }] },
+          }),
+        );
+      }
+      if (u.includes("/metadata/")) {
+        return new Response(JSON.stringify({ metadata: { title: "t", language: "eng" }, files: [{ name: "empty-item.epub" }] }));
+      }
+      if (u.includes("/download/empty-item/")) return new Response(new Uint8Array(emptySpine));
+      return new Response("Not found", { status: 404 });
+    }) as unknown as typeof fetch;
+
+    try {
+      expect(await fetchEpubFromArchiveOrg("The Time Machine", "Wells", () => {})).toBeNull();
     } finally {
       globalThis.fetch = originalFetch;
     }

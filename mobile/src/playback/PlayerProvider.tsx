@@ -1,10 +1,11 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, getBearerToken } from "@/api/client";
-import { audioKeyFromUrl, signAudioKeys, signChapterAudio, signedUrlFor } from "@/api/audio";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { ApiError } from "@/api/client";
+import { audioKeyFromUrl, audioKeysOf, signAudioKeys, signedUrlFor } from "@/api/audio";
 import { getBookDetail, getChapterSegments, putPlayback } from "@/api/books";
-import { openPipelineStream } from "@/api/sse";
 import type { Book, Chapter, Segment } from "@/api/types";
 import { useToast } from "@/components/ui";
+import { useBookEvents } from "@/hooks/useBookEvents";
+import { createSignBatcher } from "@/lib/signBatch";
 import {
   chapterDurationMs,
   findNextIndex,
@@ -18,19 +19,35 @@ import {
 import { findNextPlayableChapter, resolveStartSegmentIndex } from "@/playback/playbackSelection";
 import { createTransport } from "@/playback/audioTransport";
 import { patchSegmentReady } from "@/playback/detailsData";
+import {
+  getPositionSnapshot,
+  positionRatio,
+  resetPosition,
+  setChapterTotal,
+  setPosition,
+  subscribePosition,
+} from "@/playback/positionStore";
 import { SLEEP_OFF, beginSleep, resumeSleep, tickSleep, type SleepState } from "@/playback/sleepTimer";
 
 // Owns the whole listening session: the chapter being played, its segments and their signed
 // URLs, which line is current, the sleep timer and the ~10s playback sync. It lives in the
 // root layout so audio survives navigating between screens, matching the web client's single
 // shared <audio> element.
+//
+// Two things about its shape are deliberate. First, the play head is not in this state: it
+// moves four times a second while a line plays, and holding it in the provider's state meant
+// every tick re-rendered the provider and therefore the whole navigator. It lives in
+// `positionStore`, and only the components that display a position subscribe (`usePlayerPosition`).
+// Second, signed URLs are signed in batches and remembered for the life of the session, so a
+// chapter that streams in line by line costs one media-token request per burst instead of one
+// per line, and nothing that is already signed is ever signed twice.
 
 const POSITION_SYNC_INTERVAL_MS = 10_000;
 const STALL_POLL_INTERVAL_MS = 2000;
 
 export const PLAYBACK_SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2];
 
-interface PlayerContextValue {
+interface PlayerSessionValue {
   activeBook: Book | null;
   activeChapter: Chapter | null;
   segments: Segment[];
@@ -40,8 +57,6 @@ interface PlayerContextValue {
   isPlaying: boolean;
   isBufferingNext: boolean;
   playbackSpeed: number;
-  positionMs: number;
-  chapterTotalMs: number;
   sleep: SleepState;
   playChapter: (book: Book, chapter: Chapter, resumeMs?: number) => Promise<void>;
   togglePlayPause: () => void;
@@ -54,7 +69,7 @@ interface PlayerContextValue {
   stop: () => void;
 }
 
-const PlayerContext = createContext<PlayerContextValue | null>(null);
+const PlayerContext = createContext<PlayerSessionValue | null>(null);
 
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const { showToast } = useToast();
@@ -69,8 +84,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [isBufferingNext, setIsBufferingNext] = useState(false);
   const [awaitingNext, setAwaitingNext] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const [positionMs, setPositionMs] = useState(0);
   const [sleep, setSleep] = useState<SleepState>(SLEEP_OFF);
+
+  const signBatcher = useMemo(() => createSignBatcher((keys) => signAudioKeys(keys)), []);
+  useEffect(() => () => signBatcher.dispose(), [signBatcher]);
 
   const loadedKeyRef = useRef<string | null>(null);
   const pendingSeekRef = useRef<number | null>(null);
@@ -95,9 +112,18 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   bookRef.current = activeBook;
   chapterRef.current = activeChapter;
 
+  // The chart of the play head: the store is what the dock, the scrubber and the clock read.
+  const publishPosition = useCallback((absolute: number) => {
+    positionRef.current = absolute;
+    if (Math.abs(absolute - lastPublishedPositionRef.current) < 250) return;
+    lastPublishedPositionRef.current = absolute;
+    setPosition(absolute);
+  }, []);
+
   const mergeSigned = useCallback((additions: Record<string, string>) => {
     if (Object.keys(additions).length === 0) return;
-    setSignedUrls((previous) => ({ ...previous, ...additions }));
+    signedRef.current = { ...signedRef.current, ...additions };
+    setSignedUrls(signedRef.current);
   }, []);
 
   const syncPosition = useCallback((notifyOnUnauthorized = true) => {
@@ -118,18 +144,48 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const signKeys = useCallback(
+    async (keys: string[]) => {
+      const unique = [...new Set(keys.filter((key): key is string => !!key))];
+      if (unique.length === 0) return;
+      mergeSigned(await signBatcher.request(unique));
+    },
+    [mergeSigned, signBatcher],
+  );
+
+  // Signatures are for the lines the player is about to need, not for every line the studio
+  // finishes. A chapter voicing at one line a second used to cost one media-token request per
+  // line — 13 of them in seven seconds of listening — because each `segment_ready` was signed on
+  // arrival however far ahead of the play head it was. Three lines of runway is 8–12 seconds of
+  // audio, which is several times the 0.63s a signature takes.
+  const signUpcoming = useCallback(
+    (list: Segment[], from: number) => {
+      const wanted: string[] = [];
+      for (let offset = 0; offset < 3; offset++) {
+        const segment = list[from + offset];
+        if (!segment || segment.status !== "voiced") continue;
+        const key = audioKeyFromUrl(segment.audioUrl);
+        if (key && !signedRef.current[key]) wanted.push(key);
+      }
+      if (wanted.length === 0) return;
+      void signKeys(wanted).catch(() => {
+        // The poll that follows a reconnect retries, and the load effect asks again.
+      });
+    },
+    [signKeys],
+  );
+
   const applySegments = useCallback(
     async (fresh: Segment[]) => {
-      const missing = fresh
-        .filter((segment) => segment.status === "voiced")
-        .map((segment) => audioKeyFromUrl(segment.audioUrl))
-        .filter((key): key is string => !!key && !signedRef.current[key]);
-
-      const additions = missing.length > 0 ? await signAudioKeys([...new Set(missing)]) : {};
       setSegments(fresh);
-      mergeSigned(additions);
+      await signKeys(
+        fresh
+          .filter((segment) => segment.status === "voiced")
+          .map((segment) => audioKeyFromUrl(segment.audioUrl))
+          .filter((key): key is string => !!key && !signedRef.current[key]),
+      );
     },
-    [mergeSigned],
+    [signKeys],
   );
 
   const refreshSegments = useCallback(
@@ -159,7 +215,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        const signed = await signChapterAudio(data.segments);
+        // One request for the page the player is about to open — the whole chapter's voiced
+        // lines — and nothing for the ones already signed during this session.
+        const keys = audioKeysOf(data.segments.filter((segment) => segment.status === "voiced"));
+        const unsigned = keys.filter((key) => !signedRef.current[key]);
+        if (unsigned.length > 0) await signKeys(unsigned);
         if (requestId !== requestRef.current) return;
 
         const startIndex = resolveStartSegmentIndex(data.segments, resumeMs);
@@ -171,9 +231,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setActiveBook(book);
         setActiveChapter(data.chapter ?? chapter);
         setSegments(data.segments);
-        setSignedUrls(signed);
         setCurrentIndex(startIndex);
-        setPositionMs(resumeMs);
+        lastPublishedPositionRef.current = resumeMs;
+        setPosition(resumeMs);
         positionRef.current = resumeMs;
         setAwaitingNext(false);
         setIsBufferingNext(false);
@@ -184,7 +244,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         showToast(error instanceof ApiError ? error.message : "Could not open this chapter.", "error");
       }
     },
-    [showToast, transport],
+    [showToast, signKeys, transport],
   );
 
   const playChapterRef = useRef(playChapter);
@@ -193,7 +253,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const finishChapter = useCallback(async () => {
     transport.pause();
     setIsPlaying(false);
-    setPositionMs(0);
+    lastPublishedPositionRef.current = 0;
+    setPosition(0);
     positionRef.current = 0;
 
     const book = bookRef.current;
@@ -240,20 +301,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     return transport.subscribe({
-      // The player reports every few hundred milliseconds; only publish a changed quarter
-      // second to the UI so the transcript does not re-render on every tick.
+      // The player reports every few hundred milliseconds; the store coalesces anything that
+      // has not moved a quarter second, so the dock does not re-render on every native tick.
       onProgress: (currentTimeSec, isLoaded) => {
         if (!isLoaded) return;
-        const absolute = positionMsFor(segmentsRef.current, currentIndexRef.current, currentTimeSec);
-        positionRef.current = absolute;
-        if (Math.abs(absolute - lastPublishedPositionRef.current) >= 250) {
-          lastPublishedPositionRef.current = absolute;
-          setPositionMs(absolute);
-        }
+        publishPosition(positionMsFor(segmentsRef.current, currentIndexRef.current, currentTimeSec));
       },
       onFinished: () => handleSegmentEndedRef.current(),
     });
-  }, [transport]);
+  }, [transport, publishPosition]);
 
   // Source of truth for "what should be loaded": the current line, once its URL is signed.
   useEffect(() => {
@@ -268,7 +324,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (segment.status !== "voiced") return;
 
     const url = signedUrlFor(segment, signedUrls);
-    if (!url) return;
+    if (!url) {
+      // Landing on a line that was never signed ahead: ask for this one and the two after.
+      signUpcoming(segments, currentIndex);
+      return;
+    }
 
     const key = segmentSourceKey(segment, url);
     if (loadedKeyRef.current === key) return;
@@ -279,15 +339,22 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     transport.setRate(speedRef.current);
     setIsBufferingNext(false);
 
+    // Exactly one line ahead: the transport keeps a single preload slot and releases the line
+    // behind it, so advancing a chapter never holds a buffer nobody will play.
     const nextSegment = segments[findNextIndex(segments, currentIndex)];
     transport.prefetch(nextSegment ? signedUrlFor(nextSegment, signedUrls) : null);
-  }, [segments, signedUrls, currentIndex, activeChapter, transport]);
+  }, [segments, signedUrls, currentIndex, activeChapter, transport, signUpcoming]);
 
   useEffect(() => {
     if (!activeChapter) return;
     if (isPlaying) transport.play();
     else transport.pause();
   }, [isPlaying, activeChapter, transport]);
+
+  // The chapter's length, published once per chapter rather than per position tick.
+  useEffect(() => {
+    setChapterTotal(chapterDurationMs(segments) || activeChapter?.durationMs || 0);
+  }, [segments, activeChapter]);
 
   // Waiting on the studio: poll the chapter until the next line is voiced. The `at` anchor
   // tells the server which line to voice next.
@@ -316,40 +383,33 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     setCurrentIndex(next);
   }, [awaitingNext, segments, signedUrls, currentIndex]);
 
-  // Live pipeline updates keep the open chapter's lines current without a poll.
-  useEffect(() => {
-    if (!activeBook) return;
-    return openPipelineStream({
-      bookId: activeBook.id,
-      token: getBearerToken(),
-      onEvent: (event) => {
-        if (event.type !== "segment_ready" || event.chapterId !== chapterRef.current?.id) return;
-        const patched = patchSegmentReady(segmentsRef.current, event);
-        if (patched === segmentsRef.current) return;
+  // Live pipeline updates keep the open chapter's lines current without a poll, through the
+  // app's single stream for this book.
+  useBookEvents(
+    activeBook?.id ?? null,
+    (event) => {
+      if (event.type !== "segment_ready" || event.chapterId !== chapterRef.current?.id) return;
+      const patched = patchSegmentReady(segmentsRef.current, event);
+      if (patched === segmentsRef.current) return;
 
-        const key = audioKeyFromUrl(event.audioUrl);
-        setSegments(patched);
-        if (key) {
-          void signAudioKeys([key])
-            .then(mergeSigned)
-            .catch(() => {
-              // The poll that follows a reconnect will retry the signature.
-            });
-        }
-      },
-      onReconnect: () => void refreshSegments(),
-    });
-  }, [activeBook, mergeSigned, refreshSegments]);
+      setSegments(patched);
+      // Only the runway: a line voiced twenty ahead of the play head is signed when the player
+      // reaches it, not when the studio finishes it.
+      signUpcoming(patched, currentIndexRef.current);
+    },
+    () => void refreshSegments(),
+  );
 
-  // ~10s position sync, plus a final write whenever the active chapter changes or unmounts.
+  // ~10s position sync while a line is actually playing, plus a final write when playback
+  // pauses or the chapter changes. Nothing ticks while the listener is not playing.
   useEffect(() => {
-    if (!activeBook || !activeChapter) return;
+    if (!activeBook || !activeChapter || !isPlaying) return;
     const timer = setInterval(() => syncPosition(), POSITION_SYNC_INTERVAL_MS);
     return () => {
       clearInterval(timer);
       syncPosition(false);
     };
-  }, [activeBook, activeChapter, syncPosition]);
+  }, [activeBook, activeChapter, isPlaying, syncPosition]);
 
   // Sleep timer: one tick per second while playing; zero stops playback and resets to Off.
   useEffect(() => {
@@ -422,7 +482,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setAwaitingNext(false);
         setCurrentIndex(plan.index);
       }
-      setPositionMs(plan.positionMs);
+      lastPublishedPositionRef.current = plan.positionMs;
+      setPosition(plan.positionMs);
       positionRef.current = plan.positionMs;
     },
     [transport],
@@ -443,20 +504,22 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const stop = useCallback(() => {
     transport.pause();
+    transport.releaseSources();
     setIsPlaying(false);
     setActiveBook(null);
     setActiveChapter(null);
     setSegments([]);
     setSignedUrls({});
+    signedRef.current = {};
     setCurrentIndex(0);
-    setPositionMs(0);
     setSleep(SLEEP_OFF);
+    resetPosition();
+    positionRef.current = 0;
+    lastPublishedPositionRef.current = 0;
     loadedKeyRef.current = null;
   }, [transport]);
 
-  const chapterTotalMs = chapterDurationMs(segments) || (activeChapter?.durationMs ?? 0);
-
-  const value = useMemo<PlayerContextValue>(
+  const value = useMemo<PlayerSessionValue>(
     () => ({
       activeBook,
       activeChapter,
@@ -467,8 +530,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       isPlaying,
       isBufferingNext,
       playbackSpeed,
-      positionMs,
-      chapterTotalMs,
       sleep,
       playChapter,
       togglePlayPause,
@@ -489,8 +550,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       isPlaying,
       isBufferingNext,
       playbackSpeed,
-      positionMs,
-      chapterTotalMs,
       sleep,
       playChapter,
       togglePlayPause,
@@ -507,8 +566,21 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   return <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>;
 }
 
-export function usePlayer(): PlayerContextValue {
+export function usePlayer(): PlayerSessionValue {
   const context = useContext(PlayerContext);
   if (!context) throw new Error("usePlayer must be used inside PlayerProvider");
   return context;
+}
+
+export interface PlayheadSnapshot {
+  positionMs: number;
+  chapterTotalMs: number;
+  ratio: number;
+}
+
+// The play head, for the two or three components that draw it. Subscribing here rather than to
+// the session context is what keeps a position tick from re-rendering the rest of the app.
+export function usePlayerPosition(): PlayheadSnapshot {
+  const snapshot = useSyncExternalStore(subscribePosition, getPositionSnapshot, getPositionSnapshot);
+  return { positionMs: snapshot.positionMs, chapterTotalMs: snapshot.chapterTotalMs, ratio: positionRatio(snapshot) };
 }

@@ -6,3 +6,5 @@ export { CoverArt } from "./CoverArt";
 export { TextField } from "./TextField";
 export { Screen, Notice, EmptyState } from "./Screen";
 export { ToastProvider, useToast } from "./Toast";
+export { AnimatedProgressBar, FadeUp, LivePulse, PressableScale, ProgressRing, PulsingDot, SkeletonBlock, SkeletonRow } from "./motion";
+export type { ProgressRingProps } from "./motion";

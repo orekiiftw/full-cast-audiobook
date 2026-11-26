@@ -1,6 +1,8 @@
 import { mock } from "bun:test";
+import { createMockEpub } from "../epub/testFixture";
 
-export const ZIP_BUFFER = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00]);
+// A real EPUB, because downloads are now verified to carry a readable spine before a candidate is accepted.
+export const ZIP_BUFFER = createMockEpub({});
 
 export const VALID_CID = "bafybeigdyrzt5sfp7udm7uh76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
 

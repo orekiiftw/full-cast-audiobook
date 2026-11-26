@@ -1,4 +1,4 @@
-import { apiJson } from "./client";
+import { SEARCH_TIMEOUT_MESSAGE, SEARCH_TIMEOUT_MS, apiJson } from "./client";
 import type {
   Book,
   BookDetailResponse,
@@ -37,7 +37,12 @@ export function putPlayback(body: PlaybackSyncBody, notifyOnUnauthorized = true)
 }
 
 export function searchBooks(query: SearchQuery): Promise<BookSearchResponse> {
-  return apiJson<BookSearchResponse>("/api/book-search", { method: "POST", body: query });
+  return apiJson<BookSearchResponse>("/api/book-search", {
+    method: "POST",
+    body: query,
+    timeoutMs: SEARCH_TIMEOUT_MS,
+    timeoutMessage: SEARCH_TIMEOUT_MESSAGE,
+  });
 }
 
 export function submitBook(body: BookSubmissionBody): Promise<Book> {

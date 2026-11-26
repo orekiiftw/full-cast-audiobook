@@ -1,17 +1,33 @@
-import { ScrollView, StyleSheet, View, type ViewStyle } from "react-native";
+import { ScrollView, StyleSheet, View, type RefreshControlProps, type ViewStyle } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { colors, radius } from "@/theme/tokens";
 import { AppText, Eyebrow } from "./Text";
 import { Button } from "./Button";
 
-export function Screen({ children, scroll = true, style }: { children: React.ReactNode; scroll?: boolean; style?: ViewStyle }) {
+export function Screen({
+  children,
+  scroll = true,
+  style,
+  refreshControl,
+}: {
+  children: React.ReactNode;
+  scroll?: boolean;
+  style?: ViewStyle;
+  // Pull-to-refresh belongs to the scroll view, so the screen that wants it passes the control.
+  refreshControl?: React.ReactElement<RefreshControlProps>;
+}) {
   const body = <View style={[styles.body, style]}>{children}</View>;
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
       {scroll ? (
-        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          refreshControl={refreshControl}
+        >
           {body}
         </ScrollView>
       ) : (
@@ -23,10 +39,13 @@ export function Screen({ children, scroll = true, style }: { children: React.Rea
 
 export function Notice({
   tone = "info",
+  title,
   message,
   action,
 }: {
   tone?: "info" | "error";
+  // A headline above the detail line, for failures that must not read as one generic message.
+  title?: string;
   message: string;
   action?: { label: string; onPress: () => void };
 }) {
@@ -36,10 +55,18 @@ export function Notice({
         name={tone === "error" ? "alert-triangle" : "info"}
         size={15}
         color={tone === "error" ? colors.danger[300] : colors.info[300]}
+        style={styles.noticeIcon}
       />
-      <AppText variant="caption" tone="secondary" style={styles.noticeText}>
-        {message}
-      </AppText>
+      <View style={styles.noticeBody}>
+        {title ? (
+          <AppText variant="caption" tone={tone === "error" ? "danger" : "primary"} bold>
+            {title}
+          </AppText>
+        ) : null}
+        <AppText variant="caption" tone="secondary">
+          {message}
+        </AppText>
+      </View>
       {action ? <Button label={action.label} variant="ghost" size="md" onPress={action.onPress} /> : null}
     </View>
   );
@@ -89,7 +116,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   noticeError: { borderColor: "rgba(244, 151, 139, 0.4)" },
-  noticeText: { flex: 1 },
+  noticeIcon: { marginTop: 1 },
+  noticeBody: { flex: 1, gap: 2 },
   empty: { alignItems: "center", gap: 12, paddingVertical: 48, paddingHorizontal: 8 },
   emptyIcon: {
     width: 52,

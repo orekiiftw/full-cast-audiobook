@@ -96,6 +96,7 @@ Ensure you configure:
 - `TORBOX_API_KEY`: API credentials from TorBox (required for torrent caching/downloads).
 - `BOOK_PROVIDERS_ENABLED`: Comma-separated reviewed acquisition providers (default: `torrent,archive-org,gutenberg,libgen`). `anna-archive` is deliberately disabled until a vetted sidecar adapter replaces its fail-closed stub; see [`ARCHITECTURE.md`](ARCHITECTURE.md).
 - `BOOK_SEARCH_CACHE_TTL_MS`, `BOOK_SEARCH_MAX_RESULTS`, `PREFERRED_LANGUAGES`, and `PREFERRED_FORMATS`: Provider-search cache and ranking policy controls.
+- `BOOK_SEARCH_BUDGET_MS`: How long `POST /api/book-search` may take in total (default 15000). Providers that miss the budget are reported as `pending` instead of failing the request.
 - `R2_*`: Cloudflare R2 storage credentials (optional; the app falls back to local `./.storage/` folder if unset).
 - `HOST` / `PORT`: Bind address (default `127.0.0.1:3000`). Keep it on loopback unless you're ready to expose it; the API requires an authenticated session cookie (email + password signup/login stored in a same-origin HttpOnly cookie).
 - `CORS_ORIGIN`: Optional. Allow one external origin to call the API cross-origin. Unset by default (the SPA is served same-origin, and cross-site browser requests are rejected by fetch-metadata CSRF guards).

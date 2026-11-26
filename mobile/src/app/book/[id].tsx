@@ -43,6 +43,7 @@ export default function BookDetailScreen() {
 
   return (
     <BookDetailView
+      bookId={typeof id === "string" ? id : ""}
       detail={detail}
       activeChapterId={player.activeBook?.id === detail.book?.id ? (player.activeChapter?.id ?? null) : null}
       onBack={() => router.back()}
