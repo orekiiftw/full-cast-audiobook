@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getBearerToken } from "@/api/client";
 import { getBookDetail, retryBook } from "@/api/books";
-import { openPipelineStream } from "@/api/sse";
+import { useBookEvents } from "@/hooks/useBookEvents";
 import type { Book } from "@/api/types";
 import { createStagingState, isSettled, mergeStagingSnapshot, reduceStagingEvent, type StagingState } from "@/lib/addStage";
 import type { DetailData } from "@/playback/detailsData";
@@ -54,31 +53,31 @@ export function useBookStaging(bookId: string | null, seedTitle: string | null =
     setStaging(stagingRef.current);
     setBook(null);
     if (!bookId) return;
-
     void refresh();
+  }, [bookId, seedTitle, refresh]);
 
-    const close = openPipelineStream({
-      bookId,
-      token: getBearerToken(),
-      onEvent: (event) => {
-        const next = reduceStagingEvent(stagingRef.current, event);
-        if (next !== stagingRef.current) commit(next);
-        // A status change is the one event that also moves the payload — chapters are inserted,
-        // counters reset on retry — so the row is refetched once per transition.
-        if (event.type === "status_change") void refresh();
-      },
-      onReconnect: () => void refresh(),
-    });
+  // The book's one stream, shared with the detail screen and the player. A status change is the
+  // one event that also moves the payload — chapters are inserted, counters reset on retry — so
+  // the row is refetched once per transition.
+  useBookEvents(
+    bookId,
+    (event) => {
+      const next = reduceStagingEvent(stagingRef.current, event);
+      if (next !== stagingRef.current) commit(next);
+      if (event.type === "status_change") void refresh();
+    },
+    () => void refresh(),
+  );
 
+  // While the studio is working, the poll fills in chapter titles and counters the stream does
+  // not carry. It stops the moment the book settles.
+  useEffect(() => {
+    if (!bookId) return;
     const poll = setInterval(() => {
       if (!isSettled(stagingRef.current)) void refresh();
     }, STAGING_POLL_MS);
-
-    return () => {
-      close();
-      clearInterval(poll);
-    };
-  }, [bookId, seedTitle, refresh, commit]);
+    return () => clearInterval(poll);
+  }, [bookId, refresh]);
 
   const retry = useCallback(async () => {
     if (!bookId || retrying) return;

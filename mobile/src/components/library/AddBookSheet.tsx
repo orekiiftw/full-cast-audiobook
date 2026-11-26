@@ -15,6 +15,7 @@ import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withSpring
 import type { Book, BookResult } from "@/api/types";
 import { AppText, Badge, Button, Eyebrow, Notice, Row, Spinner, TextField } from "@/components/ui";
 import { FadeUp, PressableScale, SkeletonRow } from "@/components/ui/motion";
+import { SearchStatus } from "@/components/library/SearchStatus";
 import { StagingPanel } from "@/components/staging/StagingPanel";
 import { useBookStaging } from "@/hooks/useBookStaging";
 import type { AddBookModel } from "@/hooks/useAddBook";
@@ -224,13 +225,26 @@ export function AddBookSheet({ visible, model, onClose, onOpenBook }: AddBookShe
 
                   {searching ? (
                     <View style={styles.skeletons}>
-                      <Eyebrow>Listening to the sources…</Eyebrow>
+                      <SearchStatus
+                        live
+                        startedAt={model.startedAt}
+                        finishedAt={model.finishedAt}
+                        roster={model.providers}
+                        pending={model.pending}
+                      />
                       {[0, 1, 2].map((index) => (
                         <SkeletonRow key={index} />
                       ))}
                     </View>
                   ) : results.length > 0 ? (
                     <View style={styles.results}>
+                      <SearchStatus
+                        live={false}
+                        startedAt={model.startedAt}
+                        finishedAt={model.finishedAt}
+                        roster={model.providers}
+                        pending={model.pending}
+                      />
                       <Eyebrow>
                         {results.length} {results.length === 1 ? "match" : "matches"}
                         {sourceCount ? ` · ${sourceCount} ${sourceCount === 1 ? "source" : "sources"}` : ""}

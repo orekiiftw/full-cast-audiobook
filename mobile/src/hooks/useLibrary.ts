@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "@/api/client";
 import { deleteBook, listBooks } from "@/api/books";
 import type { Book } from "@/api/types";
+import { forgetBookSeed, rememberBookSeeds } from "@/lib/bookSeed";
 
 export interface LibraryModel {
   books: Book[];
@@ -28,6 +29,8 @@ export function useLibrary(): LibraryModel {
     try {
       const next = await listBooks();
       setBooks(next);
+      // The list is what the detail screen opens from: park the rows so it can paint at once.
+      rememberBookSeeds(next);
       setError(null);
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Could not load your library.");
@@ -48,6 +51,7 @@ export function useLibrary(): LibraryModel {
   const remove = useCallback(async (book: Book) => {
     try {
       await deleteBook(book.id);
+      forgetBookSeed(book.id);
       setBooks((current) => current.filter((candidate) => candidate.id !== book.id));
       return true;
     } catch (caught) {

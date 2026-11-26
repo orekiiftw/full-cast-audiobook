@@ -1,4 +1,12 @@
-import { createAudioPlayer, preload, setAudioModeAsync, type AudioPlayer, type AudioStatus } from "expo-audio";
+import {
+  clearAllPreloadedSources,
+  clearPreloadedSource,
+  createAudioPlayer,
+  preload,
+  setAudioModeAsync,
+  type AudioPlayer,
+  type AudioStatus,
+} from "expo-audio";
 
 // Thin imperative wrapper over one expo-audio player. The player is a singleton for the app's
 // lifetime (the provider that owns session state lives in the root layout), so a navigation
@@ -44,7 +52,10 @@ export interface AudioTransport {
   pause: () => void;
   seekTo: (seconds: number) => void;
   setRate: (rate: number) => void;
+  // Holds at most one line ready. Passing a different URL releases the previous preload first,
+  // so a chapter that advances releases the line it played instead of hoarding buffers.
   prefetch: (url: string | null) => void;
+  releaseSources: () => void;
   currentTime: () => number;
   isPlaying: () => boolean;
   subscribe: (callbacks: TransportCallbacks) => () => void;
@@ -61,6 +72,21 @@ export function createTransport(): AudioTransport {
 
   const listeners = new Set<TransportCallbacks>();
   let statusSubscription: { remove: () => void } | null = null;
+
+  // The one URL currently held for the next line, so a repeat call is a no-op and a move
+  // releases the old buffer.
+  let prefetchedUrl: string | null = null;
+
+  const releasePrefetch = () => {
+    if (prefetchedUrl === null) return;
+    const stale = prefetchedUrl;
+    prefetchedUrl = null;
+    try {
+      void Promise.resolve(clearPreloadedSource(stale)).catch(() => undefined);
+    } catch {
+      // Releasing is best-effort: a platform without a preload cache simply has nothing to free.
+    }
+  };
 
   const handleStatus = (status: AudioStatus) => {
     const instance = ensurePlayer();
@@ -136,7 +162,10 @@ export function createTransport(): AudioTransport {
       ensurePlayer().setPlaybackRate(rate, "medium");
     },
     prefetch(url) {
+      if (url === prefetchedUrl) return;
+      releasePrefetch();
       if (!url) return;
+      prefetchedUrl = url;
       try {
         // Web's preload resolves synchronously with nothing, so it cannot be chained on.
         const pending = preload(url) as Promise<unknown> | undefined;
@@ -145,6 +174,14 @@ export function createTransport(): AudioTransport {
         }
       } catch {
         // Preloading is an optimisation: a failure just means the next line starts un-buffered.
+      }
+    },
+    releaseSources() {
+      prefetchedUrl = null;
+      try {
+        void Promise.resolve(clearAllPreloadedSources()).catch(() => undefined);
+      } catch {
+        // Nothing held, nothing to release.
       }
     },
     currentTime() {

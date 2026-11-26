@@ -8,6 +8,7 @@ import { useFonts } from "expo-font";
 import { DMSans_400Regular, DMSans_400Regular_Italic, DMSans_500Medium, DMSans_700Bold } from "@expo-google-fonts/dm-sans";
 import { Fraunces_400Regular, Fraunces_400Regular_Italic, Fraunces_500Medium, Fraunces_600SemiBold } from "@expo-google-fonts/fraunces";
 import { AuthProvider, useAuth } from "@/auth/AuthProvider";
+import { PerfHud } from "@/components/dev/PerfHud";
 import { ToastProvider } from "@/components/ui";
 import { PlayerProvider } from "@/playback/PlayerProvider";
 import { colors } from "@/theme/tokens";
@@ -39,6 +40,7 @@ export default function RootLayout() {
         <AuthProvider>
           <PlayerProvider>
             <RootNavigator ready={fontsLoaded} />
+            <PerfHud />
           </PlayerProvider>
         </AuthProvider>
       </ToastProvider>
