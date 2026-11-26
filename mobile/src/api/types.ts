@@ -200,6 +200,10 @@ export interface BookSearchResponse {
   results: BookResult[];
   cache?: "hit" | "miss";
   providers?: string[];
+  // The server answers inside a fixed budget: `partial` says at least one provider was still
+  // searching, and `pending` names them. Results are never withheld because of a slow provider.
+  partial?: boolean;
+  pending?: string[];
 }
 
 // `POST /api/books` accepts JSON when there is no multipart body: title/author (or a

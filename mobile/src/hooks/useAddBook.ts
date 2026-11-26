@@ -44,7 +44,13 @@ export function useAddBook(): AddBookModel {
         ...(trimmedAuthor ? { author: trimmedAuthor } : {}),
       });
       setResults(response.results ?? []);
-      if ((response.results ?? []).length === 0) setError("No DRM-free copy found. Try the author, or add it by title.");
+      if ((response.results ?? []).length === 0) {
+        setError(
+          response.partial
+            ? "Some sources are still searching. Try again in a moment."
+            : "No DRM-free copy found. Try the author, or add it by title.",
+        );
+      }
     } catch (caught) {
       setResults(null);
       setError(caught instanceof ApiError ? caught.message : "Search failed. Try again.");

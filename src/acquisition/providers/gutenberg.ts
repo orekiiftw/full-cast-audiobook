@@ -1,6 +1,7 @@
 import { BookNotFoundError, ProviderUnavailableError } from "../errors";
 import { AcquiredBook, BookDetails, BookProvider, BookResult, SearchQuery } from "../types";
 import { acquireFirstUsableEpub, providerRedirectGuard, readProviderJson } from "./shared";
+import { ACQUISITION } from "../../lib/constants";
 import { isAllowedHost } from "../../lib/hosts";
 import { fetchWithRedirectGuard } from "../../lib/redirectGuard";
 
@@ -31,7 +32,7 @@ export class GutenbergProvider implements BookProvider {
     const url = `https://gutendex.com/books/?search=${encodeURIComponent(term)}`;
     const res = await fetchWithRedirectGuard({
       url,
-      timeoutMs: 45_000,
+      timeoutMs: ACQUISITION.PROVIDER_SEARCH_TIMEOUT_MS,
       guard: providerRedirectGuard("Gutendex search", GUTENDEX_HOSTS, this.name),
       headers: { Accept: "application/json" },
     });
