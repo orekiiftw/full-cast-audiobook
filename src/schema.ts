@@ -71,6 +71,15 @@ export const sessions = pgTable(
   }),
 );
 
+export type IngestionFailureCode = "torbox-auth" | "epub-invalid" | "provider-unreachable" | "download-failed" | "unexpected";
+
+/** What a failed ingestion stored: the actionable cause, plus the raw pipeline error for diagnosis. */
+export interface IngestionFailureReason {
+  code: IngestionFailureCode;
+  message: string;
+  detail: string;
+}
+
 export const books = pgTable(
   "books",
   {
@@ -86,6 +95,7 @@ export const books = pgTable(
     status: text("status", { enum: ["discovering", "casting", "in_progress", "ready", "failed"] })
       .notNull()
       .default("discovering"),
+    failureReason: jsonb("failure_reason").$type<IngestionFailureReason>(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (t) => ({

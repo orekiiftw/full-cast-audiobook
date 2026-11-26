@@ -114,7 +114,7 @@ async function resetBookForRetry(bookId: string): Promise<boolean> {
   return db.transaction(async (tx) => {
     const claimed = await tx
       .update(books)
-      .set({ status: "discovering" })
+      .set({ status: "discovering", failureReason: null })
       .where(and(eq(books.id, bookId), eq(books.status, "failed")))
       .returning({ id: books.id });
     if (claimed.length === 0) return false;

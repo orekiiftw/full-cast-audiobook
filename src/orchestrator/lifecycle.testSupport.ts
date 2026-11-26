@@ -7,6 +7,7 @@ import { createPipelineDatabase } from "./testSupport";
 const BOOK_ID = "book-1";
 const EPUB_KEY = `books/${BOOK_ID}/original.epub`;
 const RETRY_IN_PROGRESS = { ok: false, error: "A retry for this book is already in progress." };
+const STORED_FAILURE = '{"code":"torbox-auth","message":"Your TorBox key was rejected.","detail":"verifying your token"}';
 const WRITER_POLL_MS = 5_000;
 const WRITER_WAIT_MS = 15 * 60_000;
 
@@ -163,6 +164,20 @@ describe("retrying a failed book", () => {
     expect(ingestions).toEqual([{ bookId: BOOK_ID, source: {} }]);
   });
 
+  it("clears the stored failure reason when a retry starts, and keeps it when the retry is turned away", async () => {
+    seedFailedBook({ failureReason: STORED_FAILURE });
+    let releasePurge = () => {};
+    purgeGate = new Promise((resolve) => (releasePurge = resolve));
+
+    const first = retryFailedBook(BOOK_ID);
+    await until(() => effects.includes("purge"));
+    expect(bookFailureReason()).toBeNull();
+    expect(await retryFailedBook(BOOK_ID)).toEqual(RETRY_IN_PROGRESS);
+
+    releasePurge();
+    expect(await first).toEqual({ ok: true });
+  });
+
   it("turns away a second retry while the first is still clearing the failed run", async () => {
     seedFailedBook();
     let releasePurge = () => {};
@@ -282,8 +297,11 @@ describe("deleting a book", () => {
   });
 });
 
-function seedFailedBook({ createdAt = new Date().toISOString() } = {}): void {
-  insertBook("failed", createdAt);
+function seedFailedBook({
+  createdAt = new Date().toISOString(),
+  failureReason = null,
+}: { createdAt?: string; failureReason?: string | null } = {}): void {
+  insertBook("failed", createdAt, failureReason);
   // Chapter 1 failed when its stitch kept failing, so its voiced lines have audio; chapter 2 never voiced a line.
   insertChapter(1, "failed");
   insertSegment(1, 1, "voiced", segmentKey(1, 1));
@@ -303,13 +321,13 @@ function seedBookInProgress(): void {
   insertSegment(2, 3, "pending");
 }
 
-function insertBook(status: string, createdAt: string): void {
+function insertBook(status: string, createdAt: string, failureReason: string | null = null): void {
   sqlite
     .query(
-      `INSERT INTO books (id, user_id, title, author, source_hash, status, epub_r2_key, created_at)
-       VALUES (?, 'user-1', 'The Title', 'An Author', 'source-hash', ?, ?, ?)`,
+      `INSERT INTO books (id, user_id, title, author, source_hash, status, epub_r2_key, failure_reason, created_at)
+       VALUES (?, 'user-1', 'The Title', 'An Author', 'source-hash', ?, ?, ?, ?)`,
     )
-    .run(BOOK_ID, status, EPUB_KEY, createdAt);
+    .run(BOOK_ID, status, EPUB_KEY, failureReason, createdAt);
   sqlite
     .query(
       `INSERT INTO cast_members (id, book_id, name, aliases, importance, voice_bucket, tts_voice_name, style_string)
@@ -357,6 +375,11 @@ function runningJob<Data>(id: string, data: Data): RunningJob<Data> {
 function recordWrite(query: string): void {
   const write = /^(update|delete from) "(\w+)"/.exec(query);
   if (write) effects.push(`${write[1] === "update" ? "update" : "delete"} ${write[2]}`);
+}
+
+function bookFailureReason(): string | null | undefined {
+  return sqlite.query<{ failure_reason: string | null }, [string]>("SELECT failure_reason FROM books WHERE id = ?").get(BOOK_ID)
+    ?.failure_reason;
 }
 
 function bookStatus(): string | undefined {
