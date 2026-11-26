@@ -1,15 +1,18 @@
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { RefreshControl, StyleSheet, View } from "react-native";
 import type { Book } from "@/api/types";
 import { AppText, Button, EmptyState, Eyebrow, Notice, Screen } from "@/components/ui";
-import { colors } from "@/theme/tokens";
+import { FadeUp, SkeletonBlock } from "@/components/ui/motion";
+import { colors, radius } from "@/theme/tokens";
 import { BookCard } from "./BookCard";
 
 interface LibraryViewProps {
   books: Book[];
   loading: boolean;
+  refreshing: boolean;
   error: string | null;
   signedInAs: string | null;
   onRetry: () => void;
+  onRefresh: () => void;
   onAddBook: () => void;
   onSelectBook: (book: Book) => void;
   onDeleteBook: (book: Book) => void;
@@ -22,11 +25,11 @@ function SkeletonGrid() {
   return (
     <View style={styles.grid}>
       {[0, 1, 2, 3].map((key) => (
-        <View key={key} style={styles.skeletonCard}>
-          <View style={styles.skeletonCover} />
-          <View style={styles.skeletonLine} />
-          <View style={[styles.skeletonLine, { width: "55%" }]} />
-        </View>
+        <FadeUp key={key} index={key} step={60} style={styles.skeletonCard}>
+          <SkeletonBlock style={styles.skeletonCover} borderRadius={radius.control} />
+          <SkeletonBlock style={styles.skeletonLine} />
+          <SkeletonBlock style={[styles.skeletonLine, { width: "55%" }]} />
+        </FadeUp>
       ))}
     </View>
   );
@@ -35,9 +38,11 @@ function SkeletonGrid() {
 export function LibraryView({
   books,
   loading,
+  refreshing,
   error,
   signedInAs,
   onRetry,
+  onRefresh,
   onAddBook,
   onSelectBook,
   onDeleteBook,
@@ -50,7 +55,17 @@ export function LibraryView({
   const settled = !loading && !error;
 
   return (
-    <Screen>
+    <Screen
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={colors.gold[300]}
+          colors={[colors.gold[400]]}
+          progressBackgroundColor={colors.surface[2]}
+        />
+      }
+    >
       <View style={styles.header}>
         <View style={styles.headerCopy}>
           <Eyebrow>
@@ -72,18 +87,10 @@ export function LibraryView({
       </View>
 
       {loading ? (
-        <View style={styles.loadingWrap}>
-          <SkeletonGrid />
-          <View style={styles.loadingRow}>
-            <ActivityIndicator color={colors.gold[300]} />
-            <AppText variant="caption" tone="tertiary">
-              Opening your library…
-            </AppText>
-          </View>
-        </View>
+        <SkeletonGrid />
       ) : error ? (
         <View style={styles.errorWrap}>
-          <Notice tone="error" message={error} action={{ label: "Try again", onPress: onRetry }} />
+          <Notice tone="error" title="Your library didn't load" message={error} action={{ label: "Try again", onPress: onRetry }} />
         </View>
       ) : books.length === 0 ? (
         <EmptyState
@@ -95,8 +102,10 @@ export function LibraryView({
         />
       ) : (
         <View style={styles.grid}>
-          {books.map((book) => (
-            <BookCard key={book.id} book={book} onSelect={onSelectBook} onDelete={onDeleteBook} />
+          {books.map((book, index) => (
+            <FadeUp key={book.id} index={index} step={45} style={styles.cardSlot}>
+              <BookCard book={book} onSelect={onSelectBook} onDelete={onDeleteBook} />
+            </FadeUp>
           ))}
         </View>
       )}
@@ -112,11 +121,10 @@ const styles = StyleSheet.create({
   headerCopy: { flex: 1, gap: 8 },
   tagline: { maxWidth: 340 },
   grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" },
+  cardSlot: { width: "47%", marginBottom: 24 },
   addButton: { marginTop: 4, marginBottom: 16 },
-  loadingWrap: { gap: 20 },
-  loadingRow: { flexDirection: "row", alignItems: "center", gap: 10, justifyContent: "center" },
   errorWrap: { paddingVertical: 24 },
   skeletonCard: { width: "47%", gap: 10, marginBottom: 24 },
-  skeletonCover: { width: "100%", aspectRatio: 2 / 3, borderRadius: 10, backgroundColor: colors.surface[2] },
-  skeletonLine: { height: 12, borderRadius: 4, backgroundColor: colors.surface[2], width: "80%" },
+  skeletonCover: { width: "100%", aspectRatio: 2 / 3 },
+  skeletonLine: { height: 12, width: "80%" },
 });

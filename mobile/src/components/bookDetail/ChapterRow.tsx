@@ -1,7 +1,7 @@
-import { Pressable, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import type { Chapter } from "@/api/types";
-import { AppText, Badge, LevelMeter, ProgressBar } from "@/components/ui";
+import { AppText, Badge, LevelMeter, PressableScale, ProgressBar } from "@/components/ui";
 import { formatDuration } from "@/lib/format";
 import { isChapterPlayable } from "@/playback/playbackSelection";
 import { colors, radius } from "@/theme/tokens";
@@ -25,19 +25,15 @@ export function ChapterRow({ chapter, progress, isActive, onSelect }: ChapterRow
   const generating = chapter.status === "processing" || chapter.status === "partial_ready";
 
   return (
-    <Pressable
-      accessibilityRole="button"
+    <PressableScale
       accessibilityLabel={
         playable ? `Play chapter ${chapter.chapterIndex}: ${chapter.title}` : `Chapter ${chapter.chapterIndex} is not ready`
       }
       accessibilityState={{ disabled: !playable, selected: isActive }}
       disabled={!playable}
       onPress={() => onSelect(chapter)}
-      style={({ pressed }) => [
-        styles.row,
-        isActive ? styles.rowActive : playable ? styles.rowPlayable : styles.rowDisabled,
-        pressed && { opacity: 0.88 },
-      ]}
+      activeScale={0.985}
+      style={[styles.row, isActive ? styles.rowActive : playable ? styles.rowPlayable : styles.rowDisabled]}
     >
       <AppText variant="caption" mono tone={isActive ? "gold" : "tertiary"} style={styles.index}>
         {chapter.chapterIndex.toString().padStart(2, "0")}
@@ -87,7 +83,7 @@ export function ChapterRow({ chapter, progress, isActive, onSelect }: ChapterRow
           />
         )}
       </View>
-    </Pressable>
+    </PressableScale>
   );
 }
 
